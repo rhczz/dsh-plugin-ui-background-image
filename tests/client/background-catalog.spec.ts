@@ -117,6 +117,7 @@ describe('fetchBackgroundCatalog', () => {
   })
 
   it('reads a thrown value that is not an error', async () => {
+    // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- a transport that rejects with a non-Error is the scenario.
     vi.stubGlobal('fetch', () => Promise.reject('offline'))
     await expect(fetchBackgroundCatalog(SIGNAL)).rejects.toThrow('offline')
   })

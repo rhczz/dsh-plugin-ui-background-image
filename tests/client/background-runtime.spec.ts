@@ -206,6 +206,7 @@ beforeEach(() => {
     try {
       return Promise.resolve(answer(url, init))
     } catch (error) {
+      // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- the double forwards whatever the answer threw.
       return Promise.reject(error)
     }
   })
@@ -367,6 +368,7 @@ describe('choosing a background', () => {
   it('reports a refusal that arrived as a value rather than as an error', async () => {
     runtime.start()
     await settle()
+    // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- a scope that rejects with a non-Error is the scenario.
     scope.mutate = () => Promise.reject('preferences are read-only')
     runtime.select('preset', 'dusk')
     await settle()
