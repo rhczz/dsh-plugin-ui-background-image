@@ -1,0 +1,12 @@
+# Bundle layer applied when a profile lists this package in `dsh.profile.bundles`,
+# which `dsh plugin --profile <name> add <this package>` arranges. It inserts the
+# plugin row; `id` is the row's stable identity, so a deployment can override the
+# row by that id in the profile's own cordis.patch.yml, and every `config` field
+# is optional (see the README's configuration table).
+#
+# `name` is the package name because the installed package resolves from the
+# profile's node_modules to lib/index.js. The repository-root cordis.yaml is the
+# development overlay for the same row and points at src/index.ts instead.
+- insert:
+    - id: ui-background-image
+      name: dsh-plugin-ui-background-image

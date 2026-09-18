@@ -1,0 +1,169 @@
+/**
+ * Image management: upload an image file and delete stored ones. Opened from
+ * the picker so the picker itself stays a grid of choices, and deletion is
+ * confirmed in a second dialog rather than removed on one click.
+ * @module dsh-plugin-ui-background-image/client/BackgroundManagerDialog
+ */
+
+import { useRef, useState } from 'react'
+import { clsx } from 'clsx'
+import {
+  Button,
+  IconPlusOutline16,
+  IconTrashOutline16,
+  Modal,
+} from '@deepseek-ai/dsh-client-ui-primitives'
+import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import type { BackgroundImageSummary } from '../background-api.ts'
+import { BACKGROUND_FILE_EXTENSIONS } from '../background-formats.ts'
+import { BACKGROUND_LOCALE_NAMESPACE } from './locales.ts'
+import css from './BackgroundManagerDialog.module.css'
+
+/** `accept` attribute for the file picker, derived from the accepted formats. */
+const ACCEPT_ATTRIBUTE = BACKGROUND_FILE_EXTENSIONS.join(',')
+
+/** Props of the management dialog. */
+export interface BackgroundManagerDialogProps {
+  /** Whether the dialog is showing. */
+  open: boolean
+  /** Row translator, passed down from the registering component. */
+  t: TranslateNS<typeof BACKGROUND_LOCALE_NAMESPACE>
+  /** Absolute directory uploaded images live in, or null when the Host withheld it. */
+  directory: string | null
+  /** Images already stored. */
+  images: readonly BackgroundImageSummary[]
+  /** Whether an upload or deletion is in flight. */
+  busy: boolean
+  /** Store one image file. */
+  onUpload: (file: File) => void
+  /** Ask to delete one stored image (the dialog owns the confirmation step). */
+  onRemove: (id: string) => void
+  /** Close the dialog. */
+  onClose: () => void
+}
+
+/**
+ * Render the image management dialog with its delete confirmation.
+ * @param props - dialog data and callbacks.
+ * @returns the dialog element tree.
+ */
+export function BackgroundManagerDialog({
+  open, t, directory, images, busy, onUpload, onRemove, onClose,
+}: BackgroundManagerDialogProps) {
+  const input = useRef<HTMLInputElement>(null)
+  const [dragging, setDragging] = useState(false)
+  const [pending, setPending] = useState<BackgroundImageSummary | undefined>(undefined)
+
+  const accept = (files: FileList | null): void => {
+    // One upload at a time. The browse button is disabled while one is in
+    // flight, and a drop or a pick has to refuse by the same rule instead of
+    // starting a second request the disabled button claims is impossible.
+    if (busy) return
+    const file = files?.[0]
+    if (file !== undefined) onUpload(file)
+  }
+
+  return (
+    <>
+      <Modal
+        open={open}
+        onClose={onClose}
+        title={t('manager.title')}
+        closeLabel={t('manager.close')}
+        className={clsx(css.dialog)}
+        footer={(
+          <Button variant="outline" onClick={onClose}>{t('manager.close')}</Button>
+        )}
+      >
+        {/* The directory is named only to a page on the machine holding it:
+            copied files are a local route into the catalogue, and a path the
+            reader cannot reach says nothing but where the Host keeps its home. */}
+        <p className={css.description}>
+          {directory === null ? t('manager.descriptionRemote') : t('manager.description')}
+        </p>
+        {directory !== null && <code className={css.path}>{directory}</code>}
+
+        <div
+          className={clsx(css.dropzone, dragging && css.dropzoneActive)}
+          onDragOver={(event) => { event.preventDefault(); setDragging(true) }}
+          onDragLeave={() => { setDragging(false) }}
+          onDrop={(event) => {
+            event.preventDefault()
+            setDragging(false)
+            accept(event.dataTransfer.files)
+          }}
+        >
+          <IconPlusOutline16 className={css.dropIcon} />
+          <div className={css.dropTitle}>{busy ? t('manager.uploading') : t('manager.drop')}</div>
+          <div className={css.dropRow}>
+            <span className={css.dropOr}>{t('manager.or')}</span>
+            <Button variant="outline" disabled={busy} onClick={() => { input.current?.click() }}>
+              {t('manager.browse')}
+            </Button>
+          </div>
+          <div className={css.hint}>{t('manager.hint')}</div>
+          <input
+            ref={input}
+            type="file"
+            className={css.fileInput}
+            accept={ACCEPT_ATTRIBUTE}
+            disabled={busy}
+            onChange={(event) => {
+              accept(event.target.files)
+              // Clearing lets the same file be chosen again after a refusal.
+              event.target.value = ''
+            }}
+          />
+        </div>
+
+        <div className={css.listTitle}>{t('manager.listTitle')}</div>
+        {images.length === 0
+          ? <div className={css.empty}>{t('uploaded.empty')}</div>
+          : (
+            <ul className={css.list}>
+              {images.map(entry => (
+                <li key={entry.id} className={css.entry}>
+                  <span className={css.entryName}>{entry.name}</span>
+                  <button
+                    type="button"
+                    className={css.remove}
+                    aria-label={`${t('action.remove')} ${entry.name}`}
+                    disabled={busy}
+                    onClick={() => { setPending(entry) }}
+                  >
+                    <IconTrashOutline16 />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+      </Modal>
+
+      {pending === undefined ? null : (
+        <Modal
+          open
+          onClose={() => { setPending(undefined) }}
+          title={t('confirm.title')}
+          closeLabel={t('confirm.cancel')}
+          description={t('confirm.description')}
+          footer={(
+            <>
+              <Button variant="outline" onClick={() => { setPending(undefined) }}>{t('confirm.cancel')}</Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  onRemove(pending.id)
+                  setPending(undefined)
+                }}
+              >
+                {t('confirm.confirm')}
+              </Button>
+            </>
+          )}
+        >
+          <div className={css.confirmTarget}>{pending.name}</div>
+        </Modal>
+      )}
+    </>
+  )
+}

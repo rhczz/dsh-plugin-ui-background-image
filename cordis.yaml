@@ -1,0 +1,26 @@
+# Development overlay for a source checkout of the harness:
+#   pnpm dsh web --patch dsh-plugin-ui-background-image/cordis.yaml --port 3082
+#
+# `insert` adds the row to the composition. `name` is resolved relative to this
+# file's directory (packages/boot/app-boot/src/index.ts, anchorInsertedPluginNames),
+# so the checkout can move without an edit here. Pointing at src/index.ts requires
+# dsh to run sources through tsx; a built or installed package uses its name or
+# './lib/index.js' instead.
+- insert:
+    - id: ui-background-image
+      name: './src/index.ts'
+      # Deployment-varying values belong in config; every field is optional.
+      #
+      # config:
+      #   # Uploaded images; defaults to <harness home>/backgrounds.
+      #   imageDir: /srv/dsh/backgrounds
+      #   # Overrides the harness home; defaults to $DSH_HOME, then ~/.dsh.
+      #   dshHome: /srv/dsh
+      #   # Largest accepted upload in bytes; defaults to 20971520 (20 MiB).
+      #   maxUploadBytes: 20971520
+      #   # Background applied until a user chooses one; "restore default"
+      #   # returns here. `opacity` is the user-facing strength, 0..100.
+      #   defaultBackground:
+      #     source: preset
+      #     id: none
+      #     opacity: 65

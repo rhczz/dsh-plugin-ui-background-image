@@ -1,0 +1,93 @@
+/* Opacity control: label and readout on one line, the slider under them.
+ * The track uses the same module fill the row's selector pill uses, and the
+ * thumb the brand accent, so the control reads as part of the settings page
+ * rather than as a browser default. */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.label {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* Tabular figures keep the readout from shifting as the number changes. */
+.readout {
+  font-size: 13px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.range {
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.range::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: none;
+  border-radius: 50%;
+  corner-shape: round;
+  background: var(--dsw-alias-brand-primary);
+}
+
+.range::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  corner-shape: round;
+  background: var(--dsw-alias-brand-primary);
+}
+
+.range:hover::-webkit-slider-thumb {
+  background: var(--dsw-alias-button-primary-hover);
+}
+
+.range:hover::-moz-range-thumb {
+  background: var(--dsw-alias-button-primary-hover);
+}
+
+.range:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.hint {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
