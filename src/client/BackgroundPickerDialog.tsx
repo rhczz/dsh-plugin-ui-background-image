@@ -10,7 +10,7 @@
 
 import { useState } from 'react'
 import { clsx } from 'clsx'
-import { Button, IconCheckOutline16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconCheckOutlineRegular, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { BackgroundImageSummary } from '../background-api.ts'
 import { backgroundImageUrl } from '../background-canvas.ts'
@@ -157,7 +157,7 @@ function Tile({ tile, selected, onSelect, surfaceTint }: {
             shows what the interface will look like rather than the background
             on its own. */}
         {tile.preview.kind === 'none' ? null : <span className={css.tint} style={{ background: surfaceTint }} />}
-        {selected && <IconCheckOutline16 className={css.check} />}
+        {selected && <IconCheckOutlineRegular size={16} className={css.check} />}
       </span>
       <span className={css.tileName}>{tile.label}</span>
     </button>

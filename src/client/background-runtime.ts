@@ -14,8 +14,12 @@
  */
 
 import { fileSizeText } from '@deepseek-ai/dsh-client-ui-primitives'
+import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { SettingsPathOpView } from '@deepseek-ai/dsh-settings/types'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+// Type-only: the entry form `ctx.configForms.get` returns. Cross-plugin
+// collaboration goes through the service, never a value import (client bundle
+// purity gate).
+import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { BackgroundImageSummary } from '../background-api.ts'
 import { surfaceValue } from '../background-canvas.ts'
 import { judgeRemoteImageUrl, type RemotePolicy } from '../background-remote.ts'
@@ -28,10 +32,7 @@ import {
   type BackgroundCatalogues,
 } from '../background-selection.ts'
 import {
-  BACKGROUND_ID_FIELD,
-  BACKGROUND_OPACITY_FIELD,
-  BACKGROUND_SOURCE_FIELD,
-  BACKGROUND_URL_FIELD,
+  BACKGROUND_CONFIG_FIELD,
   DEFAULT_BACKGROUND_SETTINGS,
   DEFAULT_BACKGROUND_SOURCE,
   type BackgroundSettings,
@@ -47,6 +48,7 @@ import {
   type BackgroundCatalog,
 } from './background-catalog.ts'
 import { BackgroundPresenter, type ThemeTokenWriter } from './background-presenter.ts'
+import type { BackgroundConfigSection } from './index.ts'
 
 /** Colour scheme the palette is currently in; previews render in it. */
 export type BackgroundColorScheme = 'light' | 'dark'
@@ -133,53 +135,33 @@ function errorDetail(error: unknown): string {
 }
 
 /**
- * Path operations selecting one background. Both fields move in one write: a
- * lone `source` would be validated against the previous `id`, so a legal switch
- * away from a preset would be refused mid-transition.
+ * Path operations carrying one background. The whole selection travels as one
+ * volatile object write: the four fields are validated together against the
+ * composition layer, so a legal switch away from a preset cannot be refused
+ * mid-transition the way a lone `source` write would be.
  * @param settings - selection to persist.
  * @returns the operations for one validated write.
  */
-function selectOps(
-  settings: Pick<BackgroundSettings, 'source' | 'id' | 'url'>,
-): readonly SettingsPathOpView[] {
-  return [
-    { op: 'set', path: [BACKGROUND_SOURCE_FIELD], value: settings.source },
-    { op: 'set', path: [BACKGROUND_ID_FIELD], value: settings.id },
-    { op: 'set', path: [BACKGROUND_URL_FIELD], value: settings.url },
-  ]
-}
-
-/**
- * Path operations carrying one committed opacity.
- * @param opacity - whole percent to persist.
- * @returns the operations for one validated write.
- */
-function opacityOps(opacity: number): readonly SettingsPathOpView[] {
-  return [{ op: 'set', path: [BACKGROUND_OPACITY_FIELD], value: opacity }]
+function selectOps(settings: BackgroundSettings): readonly SettingsPathOpView[] {
+  const value: JsonValue = {
+    source: settings.source,
+    id: settings.id,
+    opacity: settings.opacity,
+    url: settings.url,
+  }
+  return [{ op: 'set', path: [BACKGROUND_CONFIG_FIELD], value }]
 }
 
 /**
  * Path operations clearing the selection, revealing the composition default.
+ *
+ * The whole field is unset rather than each of its members: `defaultBackground`
+ * is the one volatile node, so clearing it is what returns the profile's own
+ * composition layer — opacity included.
  * @returns the operations for one validated write.
  */
 function clearOps(): readonly SettingsPathOpView[] {
-  return [
-    ...clearSelectionOps(),
-    { op: 'unset', path: [BACKGROUND_OPACITY_FIELD] },
-  ]
-}
-
-/**
- * Path operations clearing which background is chosen, leaving the strength the
- * user set for whatever they choose next.
- * @returns the operations for one validated write.
- */
-function clearSelectionOps(): readonly SettingsPathOpView[] {
-  return [
-    { op: 'unset', path: [BACKGROUND_SOURCE_FIELD] },
-    { op: 'unset', path: [BACKGROUND_ID_FIELD] },
-    { op: 'unset', path: [BACKGROUND_URL_FIELD] },
-  ]
+  return [{ op: 'unset', path: [BACKGROUND_CONFIG_FIELD] }]
 }
 
 /** Sort uploaded images the way the catalogue reads, so both orders agree. */
@@ -195,7 +177,7 @@ function failureCode(error: unknown, fallback: BackgroundNotice): BackgroundNoti
 
 /** Background row state and the operations the settings page performs on it. */
 export class BackgroundRuntime {
-  private readonly host: SettingsScope<BackgroundSettings>
+  private readonly form: ConfigForm<BackgroundConfigSection>
   private readonly presenter: BackgroundPresenter
   private readonly listeners = new Set<() => void>()
   private readonly abort = new AbortController()
@@ -216,12 +198,13 @@ export class BackgroundRuntime {
   private snapshot: BackgroundRowSnapshot
 
   /**
-   * @param host - durable settings scope owned by the same plugin; the runtime
-   * never binds its own, so one namespace has one writer.
+   * @param form - the `ConfigForm` the settings service shares for this
+   * plugin's own profile entry; the runtime is its only writer, so one entry's
+   * config has one writer.
    * @param theme - client theme service; it owns the token write.
    */
-  constructor(host: SettingsScope<BackgroundSettings>, theme: ThemeTokenWriter) {
-    this.host = host
+  constructor(form: ConfigForm<BackgroundConfigSection>, theme: ThemeTokenWriter) {
+    this.form = form
     this.presenter = new BackgroundPresenter(theme)
     this.snapshot = this.buildSnapshot()
   }
@@ -233,7 +216,7 @@ export class BackgroundRuntime {
    */
   start(): () => void {
     this.presenter.start()
-    const unsubscribe = this.host.subscribe(() => { this.adopt() })
+    const unsubscribe = this.form.subscribe(() => { this.adopt() })
     this.adopt()
     this.reloadCatalog()
     return unsubscribe
@@ -277,7 +260,7 @@ export class BackgroundRuntime {
     this.setNotice('', '')
     this.project()
     this.publish()
-    this.write(selectOps({ source, id, url: '' }), 'settingsFailed')
+    this.write(selectOps(this.settings), 'settingsFailed')
   }
 
   /**
@@ -308,7 +291,7 @@ export class BackgroundRuntime {
         this.setNotice('remoteAdded', approved.host)
         this.project()
         this.publish()
-        this.write(selectOps({ source: 'remote', id: '', url: approved.url }), 'remoteFailed')
+        this.write(selectOps(this.settings), 'remoteFailed')
       })
       .catch((error: unknown) => {
         if (this.disposed) return
@@ -353,7 +336,7 @@ export class BackgroundRuntime {
       this.setNotice('', '')
       this.project()
       this.publish()
-      this.write(opacityOps(opacity), 'settingsFailed')
+      this.write(selectOps(this.settings), 'settingsFailed')
       return
     }
     // Nothing moved: put the document back on the settled value, which the last
@@ -435,7 +418,7 @@ export class BackgroundRuntime {
         this.setNotice('uploaded', summary.name)
         this.project()
         this.publish()
-        this.write(selectOps({ source: 'upload', id: summary.id, url: '' }), 'uploadFailed')
+        this.write(selectOps(this.settings), 'uploadFailed')
         // The fold above serves this image immediately; this read makes the
         // catalogue agree with the directory for everything else, a file copied
         // in by hand included. One directory read per upload, on a user action
@@ -476,9 +459,9 @@ export class BackgroundRuntime {
           }
           this.setNotice('removed', '')
           // The image is what went away, not the strength the user chose for a
-          // background: clearing only the selection leaves that preference for
-          // whatever they pick next.
-          this.write(clearSelectionOps(), 'removeFailed')
+          // background: writing the default selection back keeps that preference
+          // for whatever they pick next.
+          this.write(selectOps(this.settings), 'removeFailed')
         } else {
           this.setNotice('removed', '')
         }
@@ -502,10 +485,10 @@ export class BackgroundRuntime {
     this.presenter.dispose()
   }
 
-  /** Adopt the resolved settings document value and re-project. */
+  /** Adopt the volatile Config field's accepted value and re-project. */
   private adopt(): void {
-    const value = this.host.getSnapshot().value
-    // Until the Host resolves this namespace the runtime has no selection to
+    const value = this.form.getSnapshot().value?.[BACKGROUND_CONFIG_FIELD]
+    // Until the Host resolves this entry the runtime has no selection to
     // project, and the canvas it must leave standing is the one the served page
     // painted from the same document. Retracting that write would clear the
     // background the user chose for as long as the document takes to arrive, so
@@ -514,8 +497,9 @@ export class BackgroundRuntime {
     const changed = value.source !== this.settings.source
       || value.id !== this.settings.id
       || value.opacity !== this.settings.opacity
+      || value.url !== this.settings.url
     this.settings = value
-    // Every settings write republishes each namespace, so a change resolving to
+    // Every form write republishes the entry snapshot, so a change resolving to
     // the published selection needs no re-projection: re-installing the theme
     // layer would rewrite the document for an unchanged background. The first
     // adoption still projects, so a runtime always publishes an opening
@@ -570,13 +554,21 @@ export class BackgroundRuntime {
 
   /**
    * Queue one settings write, reporting a refusal rather than dropping it.
+   *
+   * A `ConfigForm` distinguishes the two failure kinds: a Host refusal (or a
+   * process-local form that never writes) resolves `false`, while a transport
+   * failure rejects. Both leave the setting unsaved, so both are reported.
    * @param ops - path operations applied as one validated write.
    * @param code - outcome to report when the document refuses the write; the
    * caller names the action, because a refused selection is not a failed upload
    * and saying so would send the user looking at the wrong thing.
    */
   private write(ops: readonly SettingsPathOpView[], code: BackgroundNotice): void {
-    void this.host.mutate(ops).catch((error: unknown) => {
+    void this.form.mutate(ops).then((accepted) => {
+      if (this.disposed || accepted) return
+      this.setNotice(code, '')
+      this.publish()
+    }, (error: unknown) => {
       if (this.disposed) return
       this.setNotice(code, errorDetail(error))
       this.publish()

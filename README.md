@@ -42,7 +42,7 @@ Installing from npm uses the published artifacts. Installing from a git ref or a
 - **A remote image URL** is loaded by the browser directly and never fetched by the Host, and only after the Host has judged it. Three kinds of rule apply, and only the first is a guarantee: what keeps the stored value well-formed (an absolute URL the document and the canvas can hold) and who may write it at all (the deployment's own request fence); the destination rules the deployment chooses with `remoteImageAccess`, `strict` by default; and the costs that come with loading an image from someone else's host, which are listed under limitations.
 - **The opacity control** sets how far the interface's surfaces open, from 0 (the background invisible, and the harness's own colours back exactly) to 100 (the background at its strongest), and applies while the user drags. Releasing writes once.
 - **The management dialog** uploads images (`.png` `.jpg` `.jpeg` `.webp` `.gif` `.avif`, 20 MiB each by default), deletes them, and shows the directory the files live in.
-- **The background is painted before the page's scripts run**, from the settings document the Host resolves, so a reload never shows the default background first.
+- **The background is painted before the page's scripts run**, from the profile config the Host resolves, so a reload never shows the default background first.
 
 ![The Background image row in General settings](assets/settings-background-row.png)
 
@@ -70,13 +70,13 @@ Fields are optional and belong in the profile's own `$DSH_HOME/profiles/web/cord
 | `maxUploadBytes` | `20971520` | Largest accepted upload, in bytes. The page refuses a larger file before reading it, using this package's own default until the catalogue has answered. |
 | `remoteImageAccess` | `strict` | Destination rules for remote image URLs: `strict` requires `https`, a hostname rather than an address, nothing reserved for local networks, and a name that resolves to public addresses; `any` keeps only the rules that hold the stored value well-formed. |
 | `remoteImageHosts` | none | Hostnames a remote image URL may name, each a bare hostname or a `*.suffix` wildcard. Unset places no host restriction of its own; an empty list refuses every remote image. The list applies in both modes. |
-| `defaultBackground` | `{ source: preset, id: none, opacity: 65 }` | Background used until a user chooses one, and what "restore default" returns to. |
+| `defaultBackground` | `{ source: preset, id: none, opacity: 65, url: '' }` | Background used until a user chooses one, and what "restore default" returns to. A choice the user makes is written straight back into this field. |
 
 `defaultBackground.source` is `preset`, `upload`, or `remote`: `id` names a shipped preset or a stored image, and `url` names the `https` image a `remote` selection loads. A user's own choice always wins over it. A value this package cannot act on — a non-integer limit, a preset id this build does not ship, an id the image directory could not hold, an allowlist entry that is not a bare hostname, a remote URL the gate refuses — fails at load rather than at first use.
 
 ### Where uploaded images are stored
 
-`$DSH_HOME/backgrounds`, which is `~/.dsh/backgrounds` by default, next to `settings.yaml`. The management dialog shows the path in use.
+`$DSH_HOME/backgrounds`, which is `~/.dsh/backgrounds` by default, beside the `profiles/` tree whose patches hold the saved selection. The management dialog shows the path in use.
 
 - One directory to back up, migrate, or delete; nothing is stored in the browser.
 - Copying an image into it works without the settings page, and so does deleting one.
@@ -92,7 +92,7 @@ dsh plugin --profile web remove dsh-plugin-ui-background-image
 That removes the row and stops serving the images. Two things stay behind:
 
 - **Uploaded files** in `$DSH_HOME/backgrounds`. Delete that directory to remove them, or keep it and install the package again later.
-- **The saved selection** in `$DSH_HOME/settings.yaml` under `ui-background-image`. It is inert without the package and can be deleted with it.
+- **The saved selection** in the profile patch, `$DSH_HOME/profiles/<profile>/cordis.patch.yml`, under the `ui-background-image` row's `defaultBackground` field. It is inert without the package and can be deleted with it.
 
 ### Backgrounds when the Host runs elsewhere
 
@@ -108,11 +108,11 @@ A remote image is different in one way that matters: every browser loads it from
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The package has a Host half and a browser half, joined by `package.json` (`dsh.client` and the `./client` export). The Host registers the settings section, owns the image directory, answers the HTTP routes, and injects the pre-plugin rows; the browser renders the settings row, its two dialogs, and projects every change onto the document.
+The package has a Host half and a browser half, joined by `package.json` (`dsh.client` and the `./client` export). The Host declares the row's volatile config field, owns the image directory, answers the HTTP routes, and injects the pre-plugin rows; the browser renders the settings row, its two dialogs, and projects every change onto the document.
 
 | Path | Role |
 |---|---|
-| `src/index.ts` | Host plugin body: config resolution, the settings section, the index-injection rows, route registration. |
+| `src/index.ts` | Host plugin body: config resolution, the volatile config field, the index-injection rows, route registration. |
 | `src/background-fetch-routes.ts` | Catalogue, image, upload, delete, and remote-approval routes on the shared API channel, which authenticates every one of them before a handler runs. |
 | `src/background-remote.ts` | The remote URL policy both halves apply: `https`, no credentials, a hostname rather than an address, nothing local, and the deployment's allowlist. |
 | `src/background-remote-approval.ts` | The Host's judgement of what a hostname resolves to, and the record of what it has approved for the first paint. |
@@ -120,13 +120,13 @@ The package has a Host half and a browser half, joined by `package.json` (`dsh.c
 | `src/background-files.ts` | Container identification from the leading bytes, and the readable part of a stored name. |
 | `src/background-canvas.ts`, `src/background-opacity.ts` | The canvas rule, the two token values, and the one mapping from the user's opacity to a surface alpha. |
 | `src/background-presets.ts`, `src/background-selection.ts` | The shipped backgrounds and the resolution from a persisted selection to a canvas value. |
-| `src/background-settings.ts`, `src/background-settings-schema.ts` | The settings namespace, the stored-id rule, and the schema the Host registers. |
+| `src/background-settings.ts`, `src/background-settings-schema.ts` | The row's config field, the stored-id rule, and the schema the Host validates a write with. |
 | `src/boot-background.ts` | The pre-plugin rows written into the served page. |
 | `src/client/` | The row, picker, management dialog, runtime, and the theme token layer that installs the canvas. |
 
-Three decisions shape the rest. **The image is painted on the body canvas, and the interface's surfaces are made translucent over it**: the plugin owns a stylesheet rule reading its own `--dsh-ui-background-image` variable, and overrides the two official tokens that cover the interface — `--dsw-alias-bg-base` for the surfaces and `--dsw-specific-sidebar-fill` for the sidebar column — with translucent derivations of the palette's own colours. Those values stay valid colours, so every official consumer — `background`, `background-color`, and the fade bands built from `color-mix(...)` — keeps working, and nothing outside those two documented tokens is replaced. **One control sets the strength**: the opacity maps to alphas with a single definition each. The surfaces keep `Math.round(100 - 64 × opacity ÷ 100)`, so 0 leaves them opaque, the default 65 holds them at 58%, and 100 still keeps them at 36% — enough for text over a photograph. The sidebar paints its fill twice, once on the column and once on the element inside it, so its own alpha is `1 - √(openness)`: the value whose square leaves it showing exactly what the conversation area beside it shows, and fully opaque at 0. **The first paint comes from the settings document**, not from a guess: the Host renders the resolved background into the index as a head stylesheet plus a body script that copies the per-mode values onto the same three property names the browser half writes, so the theme presenter's retraction removes them with everything else. **A remote URL is judged before it is stored, and the Host never fetches it**: a background is a request the interface makes on every page load, so a URL the user pastes could otherwise point that request at a service on their own machine or network. The text policy runs in both halves, the public-address judgement runs where resolution lives, and an index render — which cannot await a name lookup — paints a remote URL only once this process has approved it.
+Three decisions shape the rest. **The image is painted on the body canvas, and the interface's surfaces are made translucent over it**: the plugin owns a stylesheet rule reading its own `--dsh-ui-background-image` variable, and overrides the two official tokens that cover the interface — `--dsw-alias-bg-base` for the surfaces and `--dsw-specific-sidebar-fill` for the sidebar column — with translucent derivations of the palette's own colours. Those values stay valid colours, so every official consumer — `background`, `background-color`, and the fade bands built from `color-mix(...)` — keeps working, and nothing outside those two documented tokens is replaced. **One control sets the strength**: the opacity maps to alphas with a single definition each. The surfaces keep `Math.round(100 - 64 × opacity ÷ 100)`, so 0 leaves them opaque, the default 65 holds them at 58%, and 100 still keeps them at 36% — enough for text over a photograph. The sidebar paints its fill twice, once on the column and once on the element inside it, so its own alpha is `1 - √(openness)`: the value whose square leaves it showing exactly what the conversation area beside it shows, and fully opaque at 0. **The first paint comes from the profile config**, not from a guess: the Host renders the resolved background into the index as a head stylesheet plus a body script that copies the per-mode values onto the same three property names the browser half writes, so the theme presenter's retraction removes them with everything else. **A remote URL is judged before it is stored, and the Host never fetches it**: a background is a request the interface makes on every page load, so a URL the user pastes could otherwise point that request at a service on their own machine or network. The text policy runs in both halves, the public-address judgement runs where resolution lives, and an index render — which cannot await a name lookup — paints a remote URL only once this process has approved it.
 
-`source` and `id` move in one write, because a lone `source` would be validated against the previous `id`. The opacity moves in a write of its own, once per settled drag.
+The whole selection — `source`, `id`, `opacity`, and `url` — rides one volatile `defaultBackground` object written as a single config field, so no member is ever validated against a stale sibling. The Host validates that write against the row's Config schema before it persists, so a refused write leaves the stored background untouched and the row says so.
 
 </details>
 
@@ -136,7 +136,7 @@ Three decisions shape the rest. **The image is painted on the body canvas, and t
 ## Further Exploration
 
 - [Package and install a plugin](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md) — bundles, profiles, and the layer order this package installs into.
-- [Add a settings card](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-settings-card.md) — the settings-section and slot registration this row uses.
+- [Add a settings card](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-settings-card.md) — the volatile config field and slot registration this row uses.
 - [Web styling](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/web-styling.md) — the token and styling rules the installed canvas follows.
 - [ui-theme](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/client/ui-theme) — the theme service whose token layer this package writes through.
 - [License](LICENSE) — MIT.

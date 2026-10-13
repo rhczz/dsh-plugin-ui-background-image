@@ -7,6 +7,10 @@
 # `name` is the package name because the installed package resolves from the
 # profile's node_modules to lib/index.js. The repository-root cordis.yaml is the
 # development overlay for the same row and points at src/index.ts instead.
+#
+# Unlike that overlay, this layer is what makes the row's form writable: a
+# selection the user makes lands in the profile patch as this row's
+# `defaultBackground` config field.
 - insert:
     - id: ui-background-image
       name: dsh-plugin-ui-background-image

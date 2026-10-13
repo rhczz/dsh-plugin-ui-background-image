@@ -4,8 +4,22 @@ import { coverageConfigDefaults, defineConfig } from 'vitest/config'
  * Test configuration. Component specs opt into jsdom with a
  * `// @vitest-environment jsdom` pragma on their first line, so the default
  * environment stays the Node one the Host-half specs run in.
+ *
+ * `resolve.tsconfigPaths` reads this package's `tsconfig.json`, which extends
+ * the harness checkout's base config: the specs import harness packages by
+ * name, and that mapping resolves them to the checkout's sources rather than
+ * to the published copies in node_modules, the same resolution the type
+ * checker uses. A spec therefore exercises the code the running harness loads.
+ *
+ * Harness sources reached that way import React from the checkout's own
+ * node_modules; `dedupe` keeps both those sources and this package's React DOM
+ * renderer on one React instance, without which hooks see a null dispatcher.
  */
 export default defineConfig({
+  resolve: {
+    tsconfigPaths: true,
+    dedupe: ['react', 'react-dom'],
+  },
   test: {
     environment: 'node',
     include: ['tests/**/*.spec.ts', 'tests/**/*.spec.tsx'],
@@ -16,6 +30,7 @@ export default defineConfig({
         // externalizes node_modules by default, which hands that import to
         // Node's ESM loader, and it rejects the extension; transforming the
         // package lets Vite stub the stylesheet, as the browser shell does.
+        // Source files reached through the mapping above need no entry here.
         inline: ['@deepseek-ai/dsh-client-ui-primitives'],
       },
     },

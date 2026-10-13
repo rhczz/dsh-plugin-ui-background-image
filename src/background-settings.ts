@@ -23,6 +23,13 @@ import { DEFAULT_BACKGROUND_PRESET_ID, isBackgroundPresetId } from './background
 /** Settings namespace owned by this plugin; lower-case and hyphenated by contract. */
 export const BACKGROUND_SETTINGS_NAMESPACE = 'ui-background-image'
 
+/**
+ * Config field holding the persisted background, as the settings form serves
+ * it. It is the plugin entry's one volatile field, so the browser half reads
+ * and writes the whole selection through this single name.
+ */
+export const BACKGROUND_CONFIG_FIELD = 'defaultBackground'
+
 /** Field naming the catalogue the selected background belongs to. */
 export const BACKGROUND_SOURCE_FIELD = 'source'
 

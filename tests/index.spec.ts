@@ -8,7 +8,7 @@ import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type { IndexInjection } from '@deepseek-ai/dsh-host-webserver'
 import {
   BACKGROUND_CATALOG_ROUTE,
@@ -18,7 +18,7 @@ import {
   BACKGROUND_REMOTE_ROUTE,
 } from '../src/background-api.ts'
 import {
-  BACKGROUND_SETTINGS_NAMESPACE,
+  BACKGROUND_CONFIG_FIELD,
   DEFAULT_BACKGROUND_SETTINGS,
   type BackgroundSettings,
 } from '../src/background-settings.ts'
@@ -45,28 +45,42 @@ async function createHome(): Promise<string> {
   return dir
 }
 
-/** One `installSection` call as the fake settings service recorded it. */
-interface RecordedSection {
-  owner: unknown
-  namespace: string
-  schema: unknown
-  base: BackgroundSettings
-  setSource: (current: () => BackgroundSettings) => void
-  validate: (value: BackgroundSettings) => void
-  onChange: () => void
+/**
+ * A volatile Config reference double, as the Loader hands the plugin.
+ *
+ * `set` stands in for the Loader's commit: the plugin reads the reference, and
+ * this is the only way a spec moves what the next read answers with.
+ */
+export interface SettingsRef extends Volatile<BackgroundSettings | undefined> {
+  /** Commit one background, the way the Host does before it reports the change. */
+  set(next: BackgroundSettings | undefined): void
+}
+
+/**
+ * Build a reference whose snapshot answers one background.
+ * @param initial - background the reference holds; absent resolves to none.
+ * @returns the reference, with the committing method the spec drives.
+ */
+function settingsRef(initial?: BackgroundSettings): SettingsRef {
+  let value = initial
+  return {
+    get: () => value,
+    set: (next) => { value = next },
+  }
 }
 
 /** A Host context double recording the registrations `apply` makes. */
 interface TestHost {
   ctx: Context
-  /** The scoped context the fake `inject` handed to a consumer. */
-  scoped: unknown
-  sections: RecordedSection[]
+  /** Presentation policies the plugin registered on its own instance. */
+  presentations: { auto?: boolean }[]
   routes: string[]
   logger: { warn: ReturnType<typeof vi.fn> }
+  /** Fire one volatile commit the way the Loader reports it. */
+  volatileUpdate: (...paths: (readonly string[])[]) => void
   /** Push one index injection table the way a render would. */
   render: () => readonly IndexInjection[]
-  /** Release every effect `apply` registered. */
+  /** Release every effect and listener `apply` registered. */
   dispose: () => void
 }
 
@@ -76,15 +90,12 @@ interface TestHost {
  * @returns the context double.
  */
 function makeHost(options: { settings?: boolean } = {}): TestHost {
-  const sections: RecordedSection[] = []
+  const presentations: { auto?: boolean }[] = []
   const routes: string[] = []
   const disposers: (() => void)[] = []
   const listeners = new Map<string, ((payload: unknown) => void)[]>()
   const logger = { warn: vi.fn(), info: vi.fn(), debug: vi.fn(), error: vi.fn() }
 
-  // The scoped context an optional service is delivered on; the plugin body
-  // hands it to installSection, which is what the record has to name.
-  const scoped: { settings?: unknown } = {}
   const ctx = {
     logger,
     connection: {
@@ -118,21 +129,20 @@ function makeHost(options: { settings?: boolean } = {}): TestHost {
     },
     inject(_deps: readonly string[], callback: (scoped: unknown) => void) {
       if (options.settings === false) return
-      Object.assign(scoped, {
+      const child = {
+        effect(run: () => unknown) {
+          const disposer = run()
+          if (typeof disposer === 'function') disposers.push(disposer as () => void)
+          return disposer
+        },
         settings: {
-          installSection(
-            owner: unknown,
-            namespace: string,
-            schema: unknown,
-            base: BackgroundSettings,
-            hooks: Omit<RecordedSection, 'owner' | 'namespace' | 'schema' | 'base'>,
-          ) {
-            sections.push({ owner, namespace, schema, base, ...hooks })
+          configure(presentation: { auto?: boolean }) {
+            presentations.push(presentation)
             return () => {}
           },
         },
-      })
-      callback(scoped)
+      }
+      callback(child)
     },
     webServer: {
       register(route: { path: string }) {
@@ -147,10 +157,12 @@ function makeHost(options: { settings?: boolean } = {}): TestHost {
 
   return {
     ctx,
-    scoped,
-    sections,
+    presentations,
     routes,
     logger,
+    volatileUpdate: (...paths) => {
+      for (const listener of listeners.get('loader/volatile-update') ?? []) listener(paths)
+    },
     render: () => {
       const table: IndexInjection[] = []
       for (const listener of listeners.get('webserver/index-inject') ?? []) listener(table)
@@ -173,44 +185,61 @@ async function waitForDirectory(directory: string): Promise<void> {
   await vi.waitFor(async () => { await expect(stat(directory)).resolves.toBeDefined() })
 }
 
+/** The composition values a spec can set, with the selection spelled directly. */
+type SpecConfig = Omit<Config, 'defaultBackground'> & { defaultBackground?: BackgroundSettings | undefined }
+
+/**
+ * Assemble the plugin Config the Loader would hand it: the selection always
+ * rides a volatile reference, whatever the composition wrote.
+ * @param overrides - composition values, with the selection as plain data.
+ * @returns the Config record.
+ */
+function specConfig(overrides: SpecConfig = {}): Config {
+  const { defaultBackground, ...rest } = overrides
+  return {
+    ...rest,
+    defaultBackground: settingsRef(defaultBackground),
+  }
+}
+
 describe('resolveSpec', () => {
   it('puts the image directory under the harness home by default', async () => {
     const home = await createHome()
-    expect(resolveSpec({ dshHome: home }).imageDir).toBe(join(home, 'backgrounds'))
+    expect(resolveSpec(specConfig({ dshHome: home })).imageDir).toBe(join(home, 'backgrounds'))
   })
 
   it('takes the directory the composition names', () => {
-    expect(resolveSpec({ imageDir: '/srv/backgrounds' }).imageDir).toBe('/srv/backgrounds')
-  })
-
-  it('starts from the harness background and the default opacity', () => {
-    expect(resolveSpec({}).defaultBackground).toEqual(DEFAULT_BACKGROUND_SETTINGS)
+    expect(resolveSpec(specConfig({ imageDir: '/srv/backgrounds' })).imageDir).toBe('/srv/backgrounds')
   })
 
   it('accepts a composition background a deployment pinned', () => {
-    const spec = resolveSpec({ defaultBackground: { source: 'preset', id: 'mist', opacity: 20, url: '' } })
-    expect(spec.defaultBackground).toEqual({ source: 'preset', id: 'mist', opacity: 20, url: '' })
+    expect(() => resolveSpec(specConfig({
+      defaultBackground: { source: 'preset', id: 'mist', opacity: 20, url: '' },
+    }))).not.toThrow()
   })
 
   it('refuses a composition background it could not serve', () => {
     // Misconfiguration fails at load, not at the first request that would have
     // used the value.
-    expect(() => resolveSpec({ defaultBackground: { source: 'preset', id: 'comic', opacity: 65, url: '' } }))
-      .toThrow(/names no shipped background preset/)
-    expect(() => resolveSpec({ defaultBackground: { source: 'upload', id: '../x.png', opacity: 65, url: '' } }))
-      .toThrow(/not a usable stored image id/)
-    expect(() => resolveSpec({ defaultBackground: { source: 'preset', id: 'mist', opacity: 101, url: '' } }))
-      .toThrow(/whole percent/)
+    expect(() => resolveSpec(specConfig({
+      defaultBackground: { source: 'preset', id: 'comic', opacity: 65, url: '' },
+    }))).toThrow(/names no shipped background preset/)
+    expect(() => resolveSpec(specConfig({
+      defaultBackground: { source: 'upload', id: '../x.png', opacity: 65, url: '' },
+    }))).toThrow(/not a usable stored image id/)
+    expect(() => resolveSpec(specConfig({
+      defaultBackground: { source: 'preset', id: 'mist', opacity: 101, url: '' },
+    }))).toThrow(/whole percent/)
   })
 
   it('refuses an upload limit it could not apply', () => {
     for (const value of [0, -1, 1.5, Number.NaN]) {
-      expect(() => { resolveSpec({ maxUploadBytes: value }) }).toThrow(/must be a positive integer/)
+      expect(() => { resolveSpec(specConfig({ maxUploadBytes: value })) }).toThrow(/must be a positive integer/)
     }
   })
 
   it('accepts a positive whole upload limit', () => {
-    expect(resolveSpec({ maxUploadBytes: 1 }).maxUploadBytes).toBe(1)
+    expect(resolveSpec(specConfig({ maxUploadBytes: 1 })).maxUploadBytes).toBe(1)
   })
 })
 
@@ -219,23 +248,20 @@ describe('the plugin body', () => {
     expect(inject).toEqual(['webServer', 'connection'])
   })
 
-  it('installs the settings section on the composition base', async () => {
+  it('turns its own generated settings page off', async () => {
+    // The Background image row is this plugin's settings surface; a page the
+    // service generates from the raw profile config would duplicate it.
     const home = await createHome()
     const host = makeHost()
-    apply(host.ctx, { dshHome: home, defaultBackground: { source: 'preset', id: 'mist', opacity: 30, url: '' } })
-    expect(host.sections).toHaveLength(1)
-    const section = host.sections[0]
-    expect(section?.namespace).toBe(BACKGROUND_SETTINGS_NAMESPACE)
-    expect(section?.base).toEqual({ source: 'preset', id: 'mist', opacity: 30, url: '' })
-    expect(section?.owner).toBe(host.scoped)
-    expect(() => { section?.validate({ source: 'preset', id: 'comic', opacity: 65, url: '' }) })
-      .toThrow(/names no shipped background preset/)
+    apply(host.ctx, specConfig({ dshHome: home }))
+    expect(host.presentations).toEqual([{ auto: false }])
+    host.dispose()
   })
 
   it('registers every route as an effect', async () => {
     const home = await createHome()
     const host = makeHost()
-    apply(host.ctx, { dshHome: home })
+    apply(host.ctx, specConfig({ dshHome: home }))
     expect(host.routes.sort()).toEqual(
       [
         BACKGROUND_CATALOG_ROUTE,
@@ -252,28 +278,45 @@ describe('the plugin body', () => {
   it('stops answering the index once it is disposed', async () => {
     const home = await createHome()
     const host = makeHost()
-    apply(host.ctx, { dshHome: home, defaultBackground: { source: 'preset', id: 'mist', opacity: 65, url: '' } })
+    apply(host.ctx, specConfig({
+      dshHome: home,
+      defaultBackground: { source: 'preset', id: 'mist', opacity: 65, url: '' },
+    }))
     expect(host.render()).toHaveLength(2)
     host.dispose()
     expect(host.render()).toEqual([])
   })
 
-  it('collects the rows for the selection the settings service resolves', async () => {
-    const home = await createHome()
-    const host = makeHost()
-    apply(host.ctx, { dshHome: home })
+  it('paints nothing before any selection is committed', async () => {
     // The composition default is the harness background, so a render before any
     // user choice contributes nothing.
+    const home = await createHome()
+    const host = makeHost()
+    apply(host.ctx, specConfig({ dshHome: home }))
     expect(host.render()).toEqual([])
-    host.sections[0]?.setSource(() => ({ source: 'preset', id: 'ember', opacity: 90, url: '' }))
+    expect(DEFAULT_BACKGROUND_SETTINGS.source).toBe('preset')
+    host.dispose()
+  })
+
+  it('collects the rows for the selection a form write commits', async () => {
+    const home = await createHome()
+    const host = makeHost()
+    const ref = settingsRef()
+    apply(host.ctx, { dshHome: home, defaultBackground: ref })
+    expect(host.render()).toEqual([])
+    // A committed volatile value is what the next render is served from; the
+    // Loader reports the change after it has already installed the value.
+    ref.set({ source: 'preset', id: 'ember', opacity: 90, url: '' })
+    host.volatileUpdate([BACKGROUND_CONFIG_FIELD])
     expect(host.render()).toHaveLength(2)
+    host.dispose()
   })
 
   it('creates the image directory at load', async () => {
     const home = await createHome()
     const directory = join(home, 'images')
     const host = makeHost()
-    apply(host.ctx, { dshHome: home, imageDir: directory })
+    apply(host.ctx, specConfig({ dshHome: home, imageDir: directory }))
     await waitForDirectory(directory)
     expect(host.logger.warn).not.toHaveBeenCalled()
     expect(host.routes).toHaveLength(5)
@@ -287,7 +330,7 @@ describe('the plugin body', () => {
     const notADirectory = join(home, 'a-file')
     await writeFile(notADirectory, 'x')
     const host = makeHost()
-    expect(() => { apply(host.ctx, { imageDir: notADirectory }) }).toThrow(/EEXIST/)
+    expect(() => { apply(host.ctx, specConfig({ imageDir: notADirectory })) }).toThrow(/EEXIST/)
     // Nothing was registered: the fiber fails before the plugin contributes.
     expect(host.routes).toEqual([])
   })
@@ -299,37 +342,27 @@ describe('the plugin body', () => {
     const notADirectory = join(home, 'a-file')
     await writeFile(notADirectory, 'x')
     const host = makeHost()
-    apply(host.ctx, { dshHome: notADirectory })
+    apply(host.ctx, specConfig({ dshHome: notADirectory }))
     await vi.waitFor(() => {
       expect(host.logger.warn).toHaveBeenCalledWith(expect.stringContaining('could not read the user image directory'))
     })
   })
 
-  it('answers a render with the rows the current selection asks for', async () => {
-    const home = await createHome()
-    const host = makeHost()
-    apply(host.ctx, { dshHome: home })
-    expect(host.render()).toEqual([])
-    // A settings change re-reads the section: the next render is served from
-    // the value the service resolves at that moment.
-    host.sections[0]?.onChange()
-    expect(host.render()).toEqual([])
-  })
-
   it('serves the upload limit a deployment configured', () => {
-    expect(resolveSpec({ maxUploadBytes: 4096 }).maxUploadBytes).toBe(4096)
+    expect(resolveSpec(specConfig({ maxUploadBytes: 4096 })).maxUploadBytes).toBe(4096)
     expect(DEFAULT_MAX_UPLOAD_BYTES).toBe(20 * 1024 * 1024)
   })
 
   it('mounts without a settings provider, keeping the composition default', async () => {
     const home = await createHome()
     const host = makeHost({ settings: false })
-    expect(() => { apply(host.ctx, { dshHome: home }) }).not.toThrow()
+    expect(() => { apply(host.ctx, specConfig({ dshHome: home })) }).not.toThrow()
     // The routes still answer and a render still serves the composition
     // default, so a deployment without preferences loses only the row.
     expect(host.routes).toHaveLength(5)
-    expect(host.sections).toEqual([])
+    expect(host.presentations).toEqual([])
     expect(host.render()).toEqual([])
+    host.dispose()
   })
 
   it('reports the configuration a profile would write', () => {
@@ -340,17 +373,17 @@ describe('the plugin body', () => {
 
 describe('the remote image policy', () => {
   it('places no host restriction when the composition names none', () => {
-    expect(resolveSpec({}).remoteImageHosts).toEqual([])
+    expect(resolveSpec(specConfig()).remoteImageHosts).toEqual([])
   })
 
   it('takes the hosts the composition names', () => {
-    expect(resolveSpec({ remoteImageHosts: ['cdn.example.com', '*.images.example.org'] }).remoteImageHosts)
+    expect(resolveSpec(specConfig({ remoteImageHosts: ['cdn.example.com', '*.images.example.org'] })).remoteImageHosts)
       .toEqual(['cdn.example.com', '*.images.example.org'])
   })
 
   it('fails the load on an entry that is not a bare hostname', () => {
     for (const entry of ['*', 'https://cdn.example.com', 'cdn.example.com/path', 'CDN.example.com']) {
-      expect(() => resolveSpec({ remoteImageHosts: [entry] }))
+      expect(() => resolveSpec(specConfig({ remoteImageHosts: [entry] })))
         .toThrow(/is not a bare hostname or "\*\.suffix"/)
     }
   })
@@ -360,10 +393,10 @@ describe('the first-paint approval gate', () => {
   it('withholds a remote background until this process has judged the name', async () => {
     const home = await createHome()
     const host = makeHost()
-    apply(host.ctx, {
+    apply(host.ctx, specConfig({
       dshHome: home,
       defaultBackground: { source: 'remote', id: '', opacity: 65, url: 'https://cdn.example.com/a.png' },
-    })
+    }))
     // The startup judgement resolves a name, so a render before it settles
     // carries nothing rather than a URL nothing has judged.
     expect(host.render()).toEqual([])
@@ -374,29 +407,45 @@ describe('the first-paint approval gate', () => {
     dnsMock.answer = [{ address: '93.184.216.34' }]
     const home = await createHome()
     const host = makeHost()
-    apply(host.ctx, {
+    apply(host.ctx, specConfig({
       dshHome: home,
       defaultBackground: { source: 'remote', id: '', opacity: 65, url: 'https://cdn.example.com/a.png' },
-    })
+    }))
     await vi.waitFor(() => { expect(host.render()).toHaveLength(2) })
     expect(JSON.stringify(host.render())).toContain('https://cdn.example.com/a.png')
     host.dispose()
+  })
+
+  it('judges only a commit that names the field this plugin owns', async () => {
+    dnsMock.answer = [{ address: '10.0.0.5' }]
+    const home = await createHome()
+    const host = makeHost()
+    const ref = settingsRef()
+    apply(host.ctx, { dshHome: home, defaultBackground: ref })
+    ref.set({ source: 'remote', id: '', opacity: 65, url: 'https://cdn.example.com/a.png' })
+    // A commit naming another field of the same entry is not a selection
+    // change, so nothing is judged and nothing is reported.
+    host.volatileUpdate(['imageDir'])
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    expect(host.logger.warn).not.toHaveBeenCalled()
+    // The same value committed at the field this plugin owns is judged, which
+    // is what shows the first commit was the one that did nothing.
+    host.volatileUpdate([BACKGROUND_CONFIG_FIELD])
+    await vi.waitFor(() => { expect(host.logger.warn).toHaveBeenCalledWith(expect.stringContaining('private')) })
+    host.dispose()
+    dnsMock.answer = [{ address: '93.184.216.34' }]
   })
 
   it('keeps a remote background unpainted and reports a name that resolves privately', async () => {
     dnsMock.answer = [{ address: '10.0.0.5' }]
     const home = await createHome()
     const host = makeHost()
-    apply(host.ctx, { dshHome: home })
-    host.sections[0]?.setSource(() => ({
-      source: 'remote',
-      id: '',
-      opacity: 65,
-      url: 'https://cdn.example.com/a.png',
-    }))
-    // The settings service resolves a write and then reports it; the judgement
+    const ref = settingsRef()
+    apply(host.ctx, { dshHome: home, defaultBackground: ref })
+    ref.set({ source: 'remote', id: '', opacity: 65, url: 'https://cdn.example.com/a.png' })
+    // The Loader installs the value and then reports the change; the judgement
     // follows the change, not the value alone.
-    host.sections[0]?.onChange()
+    host.volatileUpdate([BACKGROUND_CONFIG_FIELD])
     await vi.waitFor(() => { expect(host.logger.warn).toHaveBeenCalledWith(expect.stringContaining('private')) })
     expect(host.render()).toEqual([])
     host.dispose()

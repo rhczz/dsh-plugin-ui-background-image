@@ -1,6 +1,52 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write dsh-plugin-ui-background-image/README.md
-README.md: 2c75315bfbb4a9f9b899fe3d53b9ba790d4f0053
-README.zh.md: 43d37e50e0882a96900175434306c4f694a33ae3
+/:
+  en: 1c5e3fd92d1c7bb6
+  zh: 0fcc6a93d1fc9db1
+/dsh-plugin-ui-background-image:
+  en: ddf70ef9985f759d
+  zh: 7eeb45a661f6e71d
+/dsh-plugin-ui-background-image/summary:
+  en: 782bfad0f1514720
+  zh: 6581a773bd2868a2
+/dsh-plugin-ui-background-image/table-of-contents:
+  en: b563e4ec4727d0de
+  zh: 44ebe7ceeda3dff6
+/dsh-plugin-ui-background-image/use-this-package:
+  en: bbff250eba0f1b89
+  zh: 0a618f05cc88ee2b
+/dsh-plugin-ui-background-image/use-this-package/install-into-a-profile:
+  en: a5d731ced3784a52
+  zh: fcbafe1700d44d4f
+/dsh-plugin-ui-background-image/use-this-package/what-you-get:
+  en: 49af333b33615f12
+  zh: c699369ab6c116f4
+/dsh-plugin-ui-background-image/use-this-package/configuration:
+  en: 0fbd7f03013a0d9c
+  zh: 2799f83c3f7da2af
+/dsh-plugin-ui-background-image/use-this-package/where-uploaded-images-are-stored:
+  en: 88775b466bb6941e
+  zh: f65c416825f2872d
+/dsh-plugin-ui-background-image/use-this-package/uninstall:
+  en: a40349e7d1d253f0
+  zh: cea3505066b84245
+/dsh-plugin-ui-background-image/use-this-package/backgrounds-when-the-host-runs-elsewhere:
+  en: c7a5a9b0982189ea
+  zh: cb9242aa35968146
+/dsh-plugin-ui-background-image/understand-the-implementation:
+  en: 8bd422be37d36ea7
+  zh: 5ca708094ab87d72
+/dsh-plugin-ui-background-image/further-exploration:
+  en: 821465163568e271
+  zh: dbf5838679ad1111
+/dsh-plugin-ui-background-image/model-experience:
+  en: 3120df665299c634
+  zh: a482f735cc04a0bc
+/dsh-plugin-ui-background-image/model-experience/kv-cache-effect:
+  en: ca75c51c89c2c9b0
+  zh: 2064958b0754647e
+/dsh-plugin-ui-background-image/known-limitations-and-deferred-work:
+  en: 8e6f81deb3894a5d
+  zh: dd0bdcef38bc1e65

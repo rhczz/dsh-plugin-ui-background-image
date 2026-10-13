@@ -9,3 +9,25 @@ packages:
 # so it is expected to run.
 allowBuilds:
   lightningcss: true
+
+# Prereleases published while this plugin tracks the 0.2 harness line: a range
+# without an exclusion would otherwise wait out the release age before pnpm
+# resolves the version the plugin is developed against.
+minimumReleaseAgeExclude:
+  - '@deepseek-ai/cordis@4.0.3'
+  - '@deepseek-ai/cordis-plugin-loader@1.0.4'
+  - '@deepseek-ai/cosmokit@1.8.4'
+  - '@deepseek-ai/schemastery@3.18.3'
+  - '@deepseek-ai/dsh-api-remotes@0.2.0-rc.2'
+  - '@deepseek-ai/dsh-client-connection@0.2.0-rc.2'
+  - '@deepseek-ai/dsh-client-locale@0.2.0-rc.2'
+  - '@deepseek-ai/dsh-client-store@0.2.0-rc.2'
+  - '@deepseek-ai/dsh-client-ui-primitives@0.2.0-rc.2'
+  - '@deepseek-ai/dsh-client-ui-renderer@0.2.0-rc.2'
+  - '@deepseek-ai/dsh-client-ui-settings@0.2.0-rc.2'
+  - '@deepseek-ai/dsh-client-ui-slots@0.2.0-rc.2'
+  - '@deepseek-ai/dsh-client-ui-theme@0.2.0-rc.2'
+  - '@deepseek-ai/dsh-home-paths@0.2.0-rc.2'
+  - '@deepseek-ai/dsh-host-webserver@0.2.0-rc.2'
+  - '@deepseek-ai/dsh-settings@0.2.0-rc.2'
+  - '@deepseek-ai/dsh-util-values@0.2.0-rc.2'

@@ -42,7 +42,7 @@ dsh plugin --profile web remove dsh-plugin-ui-background-image
 - **远程图片 URL** 只由浏览器直接加载，Host 从不代取，并且必须先通过 Host 的判定。这里有三种规则，只有第一类是「保证」：让存下的值保持良构（文档与画布都能承载的绝对 URL），以及谁有资格写它（部署自己的请求门禁）；部署用 `remoteImageAccess` 选择的「目的地规则」（默认 `strict`）；以及从别人主机加载图片必然带来的代价，统一列在限制一节。
 - **不透明度控件**决定界面各层表面透出多少，从 0（背景完全看不见，界面精确回到 harness 自带配色）到 100（背景最强），拖动过程中即时生效，松手时写入一次。
 - **管理对话框**用于上传图片（`.png` `.jpg` `.jpeg` `.webp` `.gif` `.avif`，默认单个 20 MiB）、删除图片，并显示文件所在目录。
-- **背景在页面脚本运行之前就已绘制**，取值来自 Host 解析出的设置文档，因此刷新页面不会先闪出默认背景。
+- **背景在页面脚本运行之前就已绘制**，取值来自 Host 解析出的 profile 配置，因此刷新页面不会先闪出默认背景。
 
 ![「通用设置」里的背景图片行](assets/settings-background-row.png)
 
@@ -70,13 +70,13 @@ dsh plugin --profile web remove dsh-plugin-ui-background-image
 | `maxUploadBytes` | `20971520` | 单个上传的大小上限（字节）。页面会在读取文件之前拒绝更大的文件；目录尚未回应前使用本包自带的默认值。 |
 | `remoteImageAccess` | `strict` | 远程图片 URL 的「目的地规则」：`strict` 要求 `https`、主机名而非地址、不得是本地保留名，且写时必须解析到公网地址；`any` 只保留「存下的值本身良构」这一条。 |
 | `remoteImageHosts` | 无 | 远程图片 URL 可以指向的主机名，每项是裸主机名或 `*.后缀`。不设置则不额外限制主机；设为空数组即拒绝所有远程图片。两种模式下都生效。 |
-| `defaultBackground` | `{ source: preset, id: none, opacity: 65 }` | 用户未选择时使用的背景，也是「恢复默认」回到的取值。 |
+| `defaultBackground` | `{ source: preset, id: none, opacity: 65, url: '' }` | 用户未选择时使用的背景，也是「恢复默认」回到的取值。用户做出的选择会直接写回这个字段。 |
 
 `defaultBackground.source` 取 `preset`、`upload` 或 `remote`：`id` 指向内置预设或已保存的图片，`url` 是 `remote` 选择要加载的 `https` 图片。用户自己的选择始终优先。本包无法执行的值——非整数的上限、本构建不提供的预设 id、图片目录无法容纳的 id——在加载时即失败，而不是等到第一次使用。
 
 ### 上传图片的存放位置
 
-`$DSH_HOME/backgrounds`，默认即 `~/.dsh/backgrounds`，与 `settings.yaml` 相邻。管理对话框会显示当前使用的路径。
+`$DSH_HOME/backgrounds`，默认即 `~/.dsh/backgrounds`，与保存选择所在的 `profiles/` 目录相邻。管理对话框会显示当前使用的路径。
 
 - 只有这一个目录需要备份、迁移或删除；浏览器端不保存任何东西。
 - 直接往目录里复制图片即可被识别，直接删除同样生效，都不需要打开设置页面。
@@ -92,7 +92,7 @@ dsh plugin --profile web remove dsh-plugin-ui-background-image
 这会移除该行并停止提供图片。有两样东西会留下：
 
 - **已上传的文件**位于 `$DSH_HOME/backgrounds`。删除该目录即可清除，也可以保留以便日后重新安装本包。
-- **已保存的选择**位于 `$DSH_HOME/settings.yaml` 的 `ui-background-image` 之下。没有本包时它是惰性的，可以随包一起删除。
+- **已保存的选择**位于 profile patch，即 `$DSH_HOME/profiles/<profile>/cordis.patch.yml`，在 `ui-background-image` 行的 `defaultBackground` 字段之下。没有本包时它是惰性的，可以随包一起删除。
 
 ### Host 不在本机时
 
@@ -106,11 +106,11 @@ dsh plugin --profile web remove dsh-plugin-ui-background-image
 <details>
 <summary>实现细节——点击展开</summary>
 
-本包分为 Host 半边与浏览器半边，由 `package.json`（`dsh.client` 与 `./client` 导出）连接。Host 半边注册设置命名空间、持有图片目录、应答 HTTP 路由并注入插件运行前的行；浏览器半边渲染设置行与两个对话框，并把每次改动投射到文档上。
+本包分为 Host 半边与浏览器半边，由 `package.json`（`dsh.client` 与 `./client` 导出）连接。Host 半边声明该行的易变配置字段、持有图片目录、应答 HTTP 路由并注入插件运行前的行；浏览器半边渲染设置行与两个对话框，并把每次改动投射到文档上。
 
 | 路径 | 作用 |
 |---|---|
-| `src/index.ts` | Host 插件主体：配置解析、设置命名空间、索引注入行、路由注册。 |
+| `src/index.ts` | Host 插件主体：配置解析、易变配置字段、索引注入行、路由注册。 |
 | `src/background-fetch-routes.ts` | 目录、图片、上传、删除与远程批准路由，注册在共享 API 通道上；每条路由的处理器运行前，该通道已完成认证。 |
 | `src/background-remote.ts` | 两半共用的远程 URL 策略：`https`、无凭据、主机名而非地址、非本地名，以及部署的白名单。 |
 | `src/background-remote-approval.ts` | Host 对「主机名解析到什么」的判定，以及首屏所查的已批准记录。 |
@@ -118,13 +118,13 @@ dsh plugin --profile web remove dsh-plugin-ui-background-image
 | `src/background-files.ts` | 由起始字节判定容器类型，以及由存储名得出可读名称。 |
 | `src/background-canvas.ts`、`src/background-opacity.ts` | 画布规则、两个 token 取值，以及从用户不透明度到表面 alpha 的唯一映射。 |
 | `src/background-presets.ts`、`src/background-selection.ts` | 内置背景，以及从持久化选择到画布取值的解析。 |
-| `src/background-settings.ts`、`src/background-settings-schema.ts` | 设置命名空间、存储 id 规则，以及 Host 注册的 schema。 |
+| `src/background-settings.ts`、`src/background-settings-schema.ts` | 该行的配置字段、存储 id 规则，以及 Host 校验写入所用的 schema。 |
 | `src/boot-background.ts` | 写入所服务页面的插件运行前的行。 |
 | `src/client/` | 设置行、选择器、管理对话框、运行时，以及安装画布的主题 token 层。 |
 
-三个决定塑造了其余部分。**图片画在 body 画布上，界面各层表面在其上变得半透明**：本插件拥有一条读取自有变量 `--dsh-ui-background-image` 的样式规则，并覆盖覆盖整个界面的两个官方 token——表面的 `--dsw-alias-bg-base` 与侧边栏列的 `--dsw-specific-sidebar-fill`——把它们替换为调色板自身颜色的半透明派生值。这些取值仍是合法颜色，因此所有官方消费方——`background`、`background-color`，以及由 `color-mix(...)` 构成的渐变带——都照常工作，被替换的东西不超出这两个有据可查的 token。**强度由一个控件决定**：不透明度到 alpha 的映射各只有一处定义。表面保留 `Math.round(100 - 64 × 不透明度 ÷ 100)`，因此 0 时完全不透明，默认的 65 停在 58%，100 时仍保持 36%——足以让照片之上的正文可读。侧边栏的填充色会被画两次，一次在列上、一次在列内元素上，所以它自己的 alpha 取 `1 - √(开放度)`：这个值的平方让侧边栏透出的画布量与它旁边的会话区域完全一致，且在 0 时同样回到完全不透明。**首屏绘制来自设置文档而非猜测**：Host 把解析出的背景作为一段头部样式加一段 body 脚本渲染进索引页，脚本按当前模式把取值写到浏览器半边写入的同样三个属性名上，于是主题呈现器回收时会把它们一并移除。
+三个决定塑造了其余部分。**图片画在 body 画布上，界面各层表面在其上变得半透明**：本插件拥有一条读取自有变量 `--dsh-ui-background-image` 的样式规则，并覆盖覆盖整个界面的两个官方 token——表面的 `--dsw-alias-bg-base` 与侧边栏列的 `--dsw-specific-sidebar-fill`——把它们替换为调色板自身颜色的半透明派生值。这些取值仍是合法颜色，因此所有官方消费方——`background`、`background-color`，以及由 `color-mix(...)` 构成的渐变带——都照常工作，被替换的东西不超出这两个有据可查的 token。**强度由一个控件决定**：不透明度到 alpha 的映射各只有一处定义。表面保留 `Math.round(100 - 64 × 不透明度 ÷ 100)`，因此 0 时完全不透明，默认的 65 停在 58%，100 时仍保持 36%——足以让照片之上的正文可读。侧边栏的填充色会被画两次，一次在列上、一次在列内元素上，所以它自己的 alpha 取 `1 - √(开放度)`：这个值的平方让侧边栏透出的画布量与它旁边的会话区域完全一致，且在 0 时同样回到完全不透明。**首屏绘制来自 profile 配置而非猜测**：Host 把解析出的背景作为一段头部样式加一段 body 脚本渲染进索引页，脚本按当前模式把取值写到浏览器半边写入的同样三个属性名上，于是主题呈现器回收时会把它们一并移除。
 
-`source` 与 `id` 在同一次写入中移动，因为单独写入 `source` 会拿上一个 `id` 去校验。不透明度单独写入一次，每次拖动结束只写一次。
+整个选择——`source`、`id`、`opacity` 与 `url`——装在一个易变的 `defaultBackground` 对象里，作为单个配置字段一次写入，因此没有任何一个成员会拿过期的兄弟字段去校验。Host 会在落盘前用该行的 Config schema 校验这次写入，所以被拒绝的写入不会改动已存储的背景，并且行内会如实说明。
 
 </details>
 
@@ -134,7 +134,7 @@ dsh plugin --profile web remove dsh-plugin-ui-background-image
 ## 进一步探索
 
 - [打包与安装插件](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/publish.md)——本包安装所用的 bundle、profile 与层级顺序。
-- [添加设置卡片](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-settings-card.md)——本行使用的设置命名空间与 slot 注册。
+- [添加设置卡片](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cookbook/adding-a-settings-card.md)——本行使用的易变配置字段与 slot 注册。
 - [Web 样式](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/web-styling.md)——所安装画布遵循的 token 与样式规则。
 - [ui-theme](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/client/ui-theme)——本包写入其 token 层的主题服务。
 - [许可证](LICENSE)——MIT。

@@ -34,7 +34,7 @@ import {
   type BackgroundNotice,
   type BackgroundRowSnapshot,
 } from '../../src/client/background-runtime.ts'
-import { FakeScope } from './scope-stub.ts'
+import { FakeForm } from './form-stub.ts'
 import { FakeTheme } from './theme-stub.ts'
 
 /** Composition layer every case starts from: the harness's own background. */
@@ -61,7 +61,7 @@ interface Recorded {
 /** Entry an upload through the double stores. */
 const UPLOADED = { id: 'uploaded-0123456789abcdef.png', name: 'uploaded' }
 
-let scope: FakeScope
+let scope: FakeForm
 let theme: FakeTheme
 let runtime: BackgroundRuntime
 let requests: Recorded[]
@@ -182,8 +182,8 @@ function snapshot(): BackgroundRowSnapshot {
  * @returns the runtime, for the case to start.
  */
 function painted(id: 'mist' | 'dusk' | 'ember' | 'verdant', opacity = DEFAULT_BACKGROUND_OPACITY): BackgroundRuntime {
-  scope = new FakeScope({ source: 'preset', id, opacity, url: '' })
-  runtime = new BackgroundRuntime(scope.asScope(), theme.asService())
+  scope = new FakeForm({ source: 'preset', id, opacity, url: '' })
+  runtime = new BackgroundRuntime(scope.asForm(), theme.asService())
   return runtime
 }
 
@@ -210,9 +210,9 @@ beforeEach(() => {
       return Promise.reject(error)
     }
   })
-  scope = new FakeScope(BASE)
+  scope = new FakeForm(BASE)
   theme = new FakeTheme()
-  runtime = new BackgroundRuntime(scope.asScope(), theme.asService())
+  runtime = new BackgroundRuntime(scope.asForm(), theme.asService())
 })
 
 afterEach(() => {
@@ -240,7 +240,7 @@ describe('starting', () => {
     document.body.style.setProperty(BACKGROUND_IMAGE_VARIABLE, 'url("/api/first-paint.png")')
     document.body.style.setProperty(SURFACE_BACKGROUND_PROPERTY, 'rgb(255, 255, 255)')
     scope.hideValue()
-    runtime = new BackgroundRuntime(scope.asScope(), theme.asService())
+    runtime = new BackgroundRuntime(scope.asForm(), theme.asService())
     runtime.start()
     expect(document.body.style.getPropertyValue(BACKGROUND_IMAGE_VARIABLE)).toBe('url("/api/first-paint.png")')
     expect(document.body.style.getPropertyValue(SURFACE_BACKGROUND_PROPERTY)).toBe('rgb(255, 255, 255)')
@@ -255,7 +255,7 @@ describe('starting', () => {
     document.body.style.setProperty(BACKGROUND_IMAGE_VARIABLE, 'url("/api/first-paint.png")')
     scope.hideValue()
     scope.setBase({ source: 'preset', id: 'verdant', opacity: 65, url: '' })
-    runtime = new BackgroundRuntime(scope.asScope(), theme.asService())
+    runtime = new BackgroundRuntime(scope.asForm(), theme.asService())
     runtime.start()
     scope.revealValue()
     expect(installedCanvas()).toEqual(backgroundPresetValue('verdant'))
@@ -272,16 +272,16 @@ describe('starting', () => {
   })
 
   it('paints a composition background from the first snapshot', () => {
-    scope = new FakeScope({ source: 'preset', id: 'dusk', opacity: 50, url: '' })
-    runtime = new BackgroundRuntime(scope.asScope(), theme.asService())
+    scope = new FakeForm({ source: 'preset', id: 'dusk', opacity: 50, url: '' })
+    runtime = new BackgroundRuntime(scope.asForm(), theme.asService())
     runtime.start()
     expect(installedCanvas()).toEqual(backgroundPresetValue('dusk'))
     expect(installedSurface()).toEqual(surfaceValue(surfaceAlphaPercent(50)))
   })
 
   it('waits for the catalogue before resolving a stored image', async () => {
-    scope = new FakeScope({ source: 'upload', id: STORED.id, opacity: 65, url: '' })
-    runtime = new BackgroundRuntime(scope.asScope(), theme.asService())
+    scope = new FakeForm({ source: 'upload', id: STORED.id, opacity: 65, url: '' })
+    runtime = new BackgroundRuntime(scope.asForm(), theme.asService())
     runtime.start()
     // Nothing installed yet, and nothing cleared either: the Host's first-paint
     // row already has the right background, and a guess here would replace it.
@@ -294,8 +294,8 @@ describe('starting', () => {
     answer = (_url, init) => init?.method === undefined
       ? respond(200, { imageDir: null, images: [], maxUploadBytes: 1024, remoteImageAccess: 'strict' })
       : respond(204, undefined)
-    scope = new FakeScope({ source: 'upload', id: STORED.id, opacity: 65, url: '' })
-    runtime = new BackgroundRuntime(scope.asScope(), theme.asService())
+    scope = new FakeForm({ source: 'upload', id: STORED.id, opacity: 65, url: '' })
+    runtime = new BackgroundRuntime(scope.asForm(), theme.asService())
     runtime.start()
     await settle()
     expect(installedCanvas()).toBeUndefined()
@@ -309,9 +309,11 @@ describe('choosing a background', () => {
     await settle()
     runtime.select('upload', STORED.id)
     expect(scope.batches.at(-1)).toEqual([
-      { op: 'set', path: ['source'], value: 'upload' },
-      { op: 'set', path: ['id'], value: STORED.id },
-      { op: 'set', path: ['url'], value: '' },
+      {
+        op: 'set',
+        path: ['defaultBackground'],
+        value: { source: 'upload', id: STORED.id, opacity: snapshot().opacity, url: '' },
+      },
     ])
   })
 
@@ -344,12 +346,7 @@ describe('choosing a background', () => {
     await settle()
     runtime.select('preset', 'ember')
     runtime.reset()
-    expect(scope.batches.at(-1)).toEqual([
-      { op: 'unset', path: ['source'] },
-      { op: 'unset', path: ['id'] },
-      { op: 'unset', path: ['url'] },
-      { op: 'unset', path: ['opacity'] },
-    ])
+    expect(scope.batches.at(-1)).toEqual([{ op: 'unset', path: ['defaultBackground'] }])
     expect(snapshot().selection).toEqual(BASE)
     expect(snapshot().notice).toBe('reset')
     expect(theme.sources()).toEqual([])
@@ -373,6 +370,19 @@ describe('choosing a background', () => {
     runtime.select('preset', 'dusk')
     await settle()
     expect(snapshot().noticeDetail).toBe('preferences are read-only')
+  })
+
+  it('reports a Host refusal, which a form answers with false rather than an error', async () => {
+    runtime.start()
+    await settle()
+    // A `ConfigForm` separates the two failure kinds: a transport failure
+    // rejects, while a document that refuses the write resolves false. The
+    // second carries no detail, so the row reports only that it did not save.
+    scope.mutate = () => Promise.resolve(false)
+    runtime.select('preset', 'dusk')
+    await settle()
+    expect(snapshot().notice).toBe('settingsFailed')
+    expect(snapshot().noticeDetail).toBe('')
   })
 
   it('keeps its own selection until the namespace is handed to the client', async () => {
@@ -421,8 +431,8 @@ describe('the opacity a user drags', () => {
   })
 
   it('keeps the canvas on the dragged value across frames', () => {
-    scope = new FakeScope({ source: 'preset', id: 'mist', opacity: 65, url: '' })
-    runtime = new BackgroundRuntime(scope.asScope(), theme.asService())
+    scope = new FakeForm({ source: 'preset', id: 'mist', opacity: 65, url: '' })
+    runtime = new BackgroundRuntime(scope.asForm(), theme.asService())
     runtime.start()
     runtime.previewOpacity(90)
     flushFrame()
@@ -436,7 +446,13 @@ describe('the opacity a user drags', () => {
     runtime.previewOpacity(20)
     flushFrame()
     runtime.commit(20)
-    expect(scope.batches).toEqual([[{ op: 'set', path: ['opacity'], value: 20 }]])
+    expect(scope.batches).toEqual([[
+      {
+        op: 'set',
+        path: ['defaultBackground'],
+        value: { source: 'preset', id: 'mist', opacity: 20, url: '' },
+      },
+    ]])
     expect(snapshot().opacity).toBe(20)
   })
 
@@ -546,9 +562,11 @@ describe('deleting an image', () => {
     expect(snapshot().selection).toEqual(BASE)
     expect(theme.sources()).toEqual([])
     expect(scope.batches.at(-1)).toEqual([
-      { op: 'unset', path: ['source'] },
-      { op: 'unset', path: ['id'] },
-      { op: 'unset', path: ['url'] },
+      {
+        op: 'set',
+        path: ['defaultBackground'],
+        value: { source: 'preset', id: 'none', opacity: snapshot().opacity, url: '' },
+      },
     ])
   })
 
@@ -563,9 +581,11 @@ describe('deleting an image', () => {
     await settle()
     expect(snapshot().opacity).toBe(100)
     expect(scope.batches.at(-1)).toEqual([
-      { op: 'unset', path: ['source'] },
-      { op: 'unset', path: ['id'] },
-      { op: 'unset', path: ['url'] },
+      {
+        op: 'set',
+        path: ['defaultBackground'],
+        value: { source: 'preset', id: 'none', opacity: snapshot().opacity, url: '' },
+      },
     ])
   })
 
@@ -600,8 +620,8 @@ describe('deleting an image', () => {
 
 describe('reading the catalogue again', () => {
   it('keeps the canvas when the read fails, rather than replacing it with a guess', async () => {
-    scope = new FakeScope({ source: 'preset', id: 'verdant', opacity: 65, url: '' })
-    runtime = new BackgroundRuntime(scope.asScope(), theme.asService())
+    scope = new FakeForm({ source: 'preset', id: 'verdant', opacity: 65, url: '' })
+    runtime = new BackgroundRuntime(scope.asForm(), theme.asService())
     runtime.start()
     const painted = installedCanvas()
     answer = () => refuse(500, 'the Host went away')
@@ -626,17 +646,19 @@ describe('adopting the settings document', () => {
     runtime.start()
     await settle()
     await scope.mutate([
-      { op: 'set', path: ['source'], value: 'preset' },
-      { op: 'set', path: ['id'], value: 'dusk' },
-      { op: 'set', path: ['opacity'], value: 80 },
+      {
+        op: 'set',
+        path: ['defaultBackground'],
+        value: { source: 'preset', id: 'dusk', opacity: 80, url: '' },
+      },
     ])
     expect(installedCanvas()).toEqual(backgroundPresetValue('dusk'))
     expect(installedSurface()).toEqual(surfaceValue(surfaceAlphaPercent(80)))
   })
 
   it('does not rewrite the document when a publication resolves to the same selection', async () => {
-    scope = new FakeScope({ source: 'preset', id: 'dusk', opacity: 65, url: '' })
-    runtime = new BackgroundRuntime(scope.asScope(), theme.asService())
+    scope = new FakeForm({ source: 'preset', id: 'dusk', opacity: 65, url: '' })
+    runtime = new BackgroundRuntime(scope.asForm(), theme.asService())
     runtime.start()
     const installed = installedCanvas()
     scope.notify()
@@ -814,9 +836,16 @@ describe('choosing a remote image', () => {
     runtime.selectRemote('https://CDN.Example.com/a b.png')
     await settle()
     expect(scope.batches.at(-1)).toEqual([
-      { op: 'set', path: ['source'], value: 'remote' },
-      { op: 'set', path: ['id'], value: '' },
-      { op: 'set', path: ['url'], value: 'https://cdn.example.com/a%20b.png' },
+      {
+        op: 'set',
+        path: ['defaultBackground'],
+        value: {
+          source: 'remote',
+          id: '',
+          opacity: DEFAULT_BACKGROUND_OPACITY,
+          url: 'https://cdn.example.com/a%20b.png',
+        },
+      },
     ])
     expect(snapshot().selection).toEqual({
       source: 'remote',

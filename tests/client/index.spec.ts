@@ -20,7 +20,7 @@ import { BACKGROUND_IMAGE_VARIABLE, SURFACE_BACKGROUND_PROPERTY } from '../../sr
 import { surfaceAlphaPercent } from '../../src/background-opacity.ts'
 import { backgroundPresetValue } from '../../src/background-presets.ts'
 import { BACKGROUND_SETTINGS_NAMESPACE } from '../../src/background-settings.ts'
-import { FakeScope } from './scope-stub.ts'
+import { FakeForm } from './form-stub.ts'
 import { FakeTheme } from './theme-stub.ts'
 
 /** One stored image the Host double holds. */
@@ -41,7 +41,7 @@ interface Row {
 /** Everything one mounted plugin body exposes to a spec. */
 interface Mounted {
   ctx: ClientContext
-  scope: FakeScope
+  scope: FakeForm
   boundNamespace: () => string | undefined
   theme: FakeTheme
   effects: Effect[]
@@ -58,7 +58,7 @@ interface Mounted {
  * @returns the mounted body and its contributions.
  */
 function mount(): Mounted {
-  const scope = new FakeScope({ source: 'preset', id: 'none', opacity: 65, url: '' })
+  const scope = new FakeForm({ source: 'preset', id: 'none', opacity: 65, url: '' })
   const theme = new FakeTheme()
   const effects: Effect[] = []
   const dictionaries: Mounted['dictionaries'] = []
@@ -68,10 +68,10 @@ function mount(): Mounted {
   let namespace: string | undefined
 
   const ctx = {
-    settingsScope: {
-      bind: (spec: { namespace: string }) => {
-        namespace = spec.namespace
-        return scope.asScope()
+    configForms: {
+      get: (entryNamespace: string) => {
+        namespace = entryNamespace
+        return scope.asForm()
       },
     },
     locale: {
@@ -181,7 +181,7 @@ afterEach(() => {
 
 describe('the plugin body', () => {
   it('declares the services it cannot run without', () => {
-    expect([...inject].sort()).toEqual(['locale', 'remote', 'settingsScope', 'slots', 'theme'])
+    expect([...inject].sort()).toEqual(['configForms', 'locale', 'remote', 'slots', 'theme'])
   })
 
   it('binds its own settings namespace, not another feature\u2019s', () => {
@@ -234,9 +234,11 @@ describe('what the row can do', () => {
     ;(actions.select as (source: string, id: string) => void)('preset', 'dusk')
     await vi.waitFor(() => { expect(mounted.scope.batches).toHaveLength(1) })
     expect(mounted.scope.batches[0]).toEqual([
-      { op: 'set', path: ['source'], value: 'preset' },
-      { op: 'set', path: ['id'], value: 'dusk' },
-      { op: 'set', path: ['url'], value: '' },
+      {
+        op: 'set',
+        path: ['defaultBackground'],
+        value: { source: 'preset', id: 'dusk', opacity: 65, url: '' },
+      },
     ])
   })
 
@@ -252,7 +254,13 @@ describe('what the row can do', () => {
     ;(actions.select as (source: string, id: string) => void)('preset', 'dusk')
     ;(actions.commitOpacity as (opacity: number) => void)(30)
     await vi.waitFor(() => { expect(mounted.scope.batches).toHaveLength(2) })
-    expect(mounted.scope.batches[1]).toEqual([{ op: 'set', path: ['opacity'], value: 30 }])
+    expect(mounted.scope.batches[1]).toEqual([
+      {
+        op: 'set',
+        path: ['defaultBackground'],
+        value: { source: 'preset', id: 'dusk', opacity: 30, url: '' },
+      },
+    ])
     expect(installedLayer(mounted)?.[SURFACE_BACKGROUND_PROPERTY]?.light)
       .toContain(`${surfaceAlphaPercent(30)}%, transparent`)
   })
@@ -272,12 +280,7 @@ describe('what the row can do', () => {
     ;(actions.reset as () => void)()
     await vi.waitFor(() => { expect(installedLayer(mounted)).toBeUndefined() })
     expect(mounted.scope.batches).toHaveLength(2)
-    expect(mounted.scope.batches[1]).toEqual([
-      { op: 'unset', path: ['source'] },
-      { op: 'unset', path: ['id'] },
-      { op: 'unset', path: ['url'] },
-      { op: 'unset', path: ['opacity'] },
-    ])
+    expect(mounted.scope.batches[1]).toEqual([{ op: 'unset', path: ['defaultBackground'] }])
   })
 
   it('stores a file the row uploads, under the collection route', async () => {
@@ -346,9 +349,11 @@ describe('what the row can do with a remote image', () => {
     ;(actions.selectRemote as (url: string) => void)('https://cdn.example.com/a.png')
     await vi.waitFor(() => { expect(mounted.scope.batches).toHaveLength(1) })
     expect(mounted.scope.batches[0]).toEqual([
-      { op: 'set', path: ['source'], value: 'remote' },
-      { op: 'set', path: ['id'], value: '' },
-      { op: 'set', path: ['url'], value: 'https://cdn.example.com/a.png' },
+      {
+        op: 'set',
+        path: ['defaultBackground'],
+        value: { source: 'remote', id: '', opacity: 65, url: 'https://cdn.example.com/a.png' },
+      },
     ])
   })
 

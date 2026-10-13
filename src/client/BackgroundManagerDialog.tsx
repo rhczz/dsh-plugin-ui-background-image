@@ -9,8 +9,8 @@ import { useRef, useState } from 'react'
 import { clsx } from 'clsx'
 import {
   Button,
-  IconPlusOutline16,
-  IconTrashOutline16,
+  IconPlusOutlineRegular,
+  IconTrashOutlineRegular,
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
@@ -93,7 +93,7 @@ export function BackgroundManagerDialog({
             accept(event.dataTransfer.files)
           }}
         >
-          <IconPlusOutline16 className={css.dropIcon} />
+          <IconPlusOutlineRegular size={16} className={css.dropIcon} />
           <div className={css.dropTitle}>{busy ? t('manager.uploading') : t('manager.drop')}</div>
           <div className={css.dropRow}>
             <span className={css.dropOr}>{t('manager.or')}</span>
@@ -131,7 +131,7 @@ export function BackgroundManagerDialog({
                     disabled={busy}
                     onClick={() => { setPending(entry) }}
                   >
-                    <IconTrashOutline16 />
+                    <IconTrashOutlineRegular size={16} />
                   </button>
                 </li>
               ))}

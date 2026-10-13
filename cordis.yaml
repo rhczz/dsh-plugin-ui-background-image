@@ -6,6 +6,12 @@
 # so the checkout can move without an edit here. Pointing at src/index.ts requires
 # dsh to run sources through tsx; a built or installed package uses its name or
 # './lib/index.js' instead.
+#
+# A row this overlay inserts is not writable: the Host refuses a settings write with
+# `Configuration for "ui-background-image" is overridden by a home patch or command-line
+# overlay` (packages/boot/config-editor/src/index.ts), because this layer outranks
+# the profile patch the write would land in. Set `config` here and restart instead;
+# the bundle layer (cordis.patch.yml) is what makes the row's form writable.
 - insert:
     - id: ui-background-image
       name: './src/index.ts'
@@ -18,9 +24,16 @@
       #   dshHome: /srv/dsh
       #   # Largest accepted upload in bytes; defaults to 20971520 (20 MiB).
       #   maxUploadBytes: 20971520
+      #   # Hostnames a remote image URL may name; unset places no host restriction.
+      #   remoteImageHosts:
+      #     - cdn.example.com
+      #   # How far a remote image URL may reach: strict (default) or any.
+      #   remoteImageAccess: strict
       #   # Background applied until a user chooses one; "restore default"
-      #   # returns here. `opacity` is the user-facing strength, 0..100.
+      #   # returns here. `opacity` is the user-facing strength, 0..100, and
+      #   # `url` carries the address of a `source: remote` selection.
       #   defaultBackground:
       #     source: preset
       #     id: none
       #     opacity: 65
+      #     url: ''

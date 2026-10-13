@@ -13,9 +13,13 @@
 
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Context } from '@deepseek-ai/cordis'
+import type { Context, Volatile } from '@deepseek-ai/cordis'
+// Type-only: the `loader/volatile-update` event declaration the Host listens for.
+import type {} from '@deepseek-ai/cordis-plugin-loader'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+// Type-only: the `settings` service this plugin turns its generated settings
+// page off through; the browser half owns the row that replaces it.
 import type {} from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
 import { DEFAULT_MAX_UPLOAD_BYTES } from './background-api.ts'
@@ -30,7 +34,7 @@ import { ApprovedRemoteImages } from './background-remote-approval.ts'
 import { bootBackgroundInjections } from './boot-background.ts'
 import { registerBackgroundRoutes } from './background-fetch-routes.ts'
 import {
-  BACKGROUND_SETTINGS_NAMESPACE,
+  BACKGROUND_CONFIG_FIELD,
   DEFAULT_BACKGROUND_SETTINGS,
   validateBackgroundSettings,
   type BackgroundSettings,
@@ -38,10 +42,14 @@ import {
 import { BackgroundSettingsSchema } from './background-settings-schema.ts'
 import { USER_BACKGROUND_DIR_NAME, UserBackgroundDirectory } from './user-backgrounds.ts'
 
+/** Plugin name the Loader reports in diagnostics and fiber dumps. */
+export const name = 'ui-background-image'
+
 /**
- * Required service: the web server this plugin's routes live on. The browser
- * half has nothing to read or write without it, so a profile that serves no
- * web surface leaves this plugin inactive rather than half mounted.
+ * Required services: the web server this plugin's routes live on, and the API
+ * channel those routes are registered through. The browser half has nothing to
+ * read or write without them, so a profile that serves no web surface leaves
+ * this plugin inactive rather than half mounted.
  */
 export const inject = ['webServer', 'connection']
 
@@ -67,8 +75,12 @@ export interface Config {
    * anywhere — including at its own network.
    */
   remoteImageAccess?: RemoteAccessMode
-  /** Background this profile starts with, overridden by any user choice. */
-  defaultBackground?: BackgroundSettings
+  /**
+   * Background this profile starts with, overridden by any user choice; read
+   * through the reference the Loader hands the plugin. Absent until a
+   * composition layer or a form write supplies one.
+   */
+  defaultBackground?: Volatile<BackgroundSettings | undefined>
 }
 
 /** Fully resolved plugin parameters; defaulting happens here, never inline. */
@@ -81,15 +93,15 @@ interface ResolvedSpec {
   remoteImageHosts: readonly string[]
   /** Remote image policy this deployment applies. */
   remotePolicy: RemotePolicy
-  /** Background installed as the settings section's composition base. */
-  defaultBackground: BackgroundSettings
 }
 
 /**
  * Resolve the runtime spec from plugin config.
  *
  * An unusable value fails here, at load, rather than at the first request that
- * would have used it.
+ * would have used it. The selection is validated the same way, over the value
+ * this load starts from; later values are validated by the Host against this
+ * entry's Config schema before any volatile edit persists.
  * @param config - raw plugin config.
  * @returns the fully resolved parameters.
  * @throws {TypeError} when a configured value could not be served.
@@ -111,36 +123,46 @@ export function resolveSpec(config: Config): ResolvedSpec {
     access: config.remoteImageAccess ?? DEFAULT_REMOTE_ACCESS,
     hostAllowlist: remoteImageHosts,
   }
-  const defaultBackground = config.defaultBackground ?? DEFAULT_BACKGROUND_SETTINGS
-  validateBackgroundSettings(defaultBackground, remotePolicy)
+  validateBackgroundSettings(config.defaultBackground?.get() ?? DEFAULT_BACKGROUND_SETTINGS, remotePolicy)
   return {
     imageDir: config.imageDir ?? join(resolveDshHome(config.dshHome), USER_BACKGROUND_DIR_NAME),
     maxUploadBytes,
     remoteImageHosts,
     remotePolicy,
-    defaultBackground,
   }
 }
 
 /** Schema of this plugin's composition entry, so a profile gets its values validated. */
-export const Config: z<Config> = z.object({
+export const Config = z.object({
   imageDir: z.string(),
   dshHome: z.string(),
   maxUploadBytes: z.number().default(DEFAULT_MAX_UPLOAD_BYTES),
   remoteImageHosts: z.array(z.string()),
   remoteImageAccess: z.union([...REMOTE_ACCESS_MODES]).default(DEFAULT_REMOTE_ACCESS),
-  defaultBackground: BackgroundSettingsSchema,
+  // Volatile: the settings form edits this field on the live instance, and a
+  // write preserves the fiber instead of remounting the plugin.
+  defaultBackground: BackgroundSettingsSchema.volatile(),
 })
 
 /**
- * Register the settings section, the image routes, and the first-paint rows.
+ * Register the image routes, the first-paint rows, and the follow-up that keeps
+ * the remote-approval record on whatever background is currently committed.
  * @param ctx - owning Host context; every registration is an effect it releases.
- * @param config - composition entry for this plugin.
+ * @param config - composition entry for this plugin, resolved by the Loader
+ * through the Config schema.
  * @throws when an explicitly configured image directory cannot be created: the
  * throw reaches the loader before any registration exists, so the plugin fails
  * rather than mounting a feature with nowhere to store an image.
  */
 export function apply(ctx: Context, config: Config = {}): void {
+  // This plugin owns its settings surface: the Background image row registers
+  // the selection, so the settings UI must not also generate a page from the raw
+  // profile config. The namespace itself still comes from the Loader entry, so
+  // the browser half reads the same form either way.
+  ctx.inject(['settings'], (child) => {
+    child.effect(() => child.settings.configure({ auto: false }, ctx.fiber))
+  })
+
   const spec = resolveSpec(config)
   const images = new UserBackgroundDirectory(spec.imageDir, ctx.logger)
 
@@ -155,7 +177,10 @@ export function apply(ctx: Context, config: Config = {}): void {
     })
   }
 
-  let currentSettings: () => BackgroundSettings = () => spec.defaultBackground
+  // The live Config reference is the one reader: it already answers the latest
+  // committed value, whatever composition or form write last set it.
+  const currentSettings = (): BackgroundSettings =>
+    config.defaultBackground?.get() ?? DEFAULT_BACKGROUND_SETTINGS
   const approvals = new ApprovedRemoteImages()
   // A remote URL paints on the first frame only once this process has judged the
   // name it resolves to. The write path approves what the user picks; this
@@ -169,25 +194,17 @@ export function apply(ctx: Context, config: Config = {}): void {
     })
   }
 
-  // The composition entry supplies the section's base layer, so a profile can
-  // pin a house background that every user choice overrides and a reset returns
-  // to.
-  ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.installSection(
-      settingsCtx,
-      BACKGROUND_SETTINGS_NAMESPACE,
-      BackgroundSettingsSchema,
-      spec.defaultBackground,
-      {
-        setSource: (current) => { currentSettings = current },
-        // A selection change is what the approval record has to follow: the
-        // first-paint row reads it when an index asks for the rows.
-        onChange: () => { judgePersistedRemote() },
-        validate: value => { validateBackgroundSettings(value, spec.remotePolicy) },
-      },
-    )
+  // A selection change commits the reference, then reports it here, so the
+  // approval record follows whatever the user chose without a remount. The
+  // first-paint row reads that record when an index asks for the rows.
+  ctx.on('loader/volatile-update', (paths) => {
+    if (!paths.some(path => path[0] === BACKGROUND_CONFIG_FIELD)) return
     judgePersistedRemote()
   })
+
+  // This process may be starting on a document it did not write, so the stored
+  // selection is judged once here rather than assumed.
+  judgePersistedRemote()
 
   ctx.on('webserver/index-inject', (table) => {
     const settings = currentSettings()

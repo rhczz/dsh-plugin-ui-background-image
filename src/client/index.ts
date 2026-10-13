@@ -1,12 +1,12 @@
 /**
- * Browser half of the background image plugin. It binds the feature's settings
- * namespace, owns the runtime that projects the chosen background onto the
- * document canvas, and registers the Background image row in the General
- * settings section, directly under the Font row.
+ * Browser half of the background image plugin. It binds the form the Host
+ * projects for the plugin's Config, owns the runtime that projects the chosen
+ * background onto the document canvas, and registers the Background image row in
+ * the General settings section, directly under the Font row.
  *
- * The settings namespace is registered by the Host half; this half consumes it,
- * so a deployment that loads the plugin before any browser connects still paints
- * the chosen background for the first frame.
+ * The volatile Config field is registered by the Host half; this half consumes
+ * the served form, so a deployment that loads the plugin before any browser
+ * connects still paints the chosen background for the first frame.
  * @module dsh-plugin-ui-background-image/client
  */
 
@@ -19,10 +19,14 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-theme/client'
 // Type-only: pulls the SlotRegistry service merge (ctx.slots).
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
-// Type-only: the ctx.settingsScope Context merge and the scope contract. The
-// background half never imports another feature plugin's values.
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
-import { BACKGROUND_SETTINGS_NAMESPACE, type BackgroundSettings } from '../background-settings.ts'
+// Type-only: the ctx.configForms Context merge. Cross-plugin collaboration goes
+// through the service, never a value import (client bundle purity gate).
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import {
+  BACKGROUND_CONFIG_FIELD,
+  BACKGROUND_SETTINGS_NAMESPACE,
+  type BackgroundSettings,
+} from '../background-settings.ts'
 import { BackgroundImageRow, type BackgroundImageRowInjected } from './BackgroundImageRow.tsx'
 import { BackgroundRuntime } from './background-runtime.ts'
 import { BACKGROUND_LOCALE_NAMESPACE, en, zh } from './locales.ts'
@@ -32,13 +36,14 @@ export type { BackgroundImageRowComponentProps, BackgroundImageRowInjected } fro
 export type { BackgroundRowState } from './settings-store.ts'
 
 /**
- * Required services: the settings transport, the slots/locale pair the row
- * registers through, `remote`, which carries the forwarded settings
- * invalidation `ctx.settingsScope.bind()` subscribes to on this context, and
- * `theme`, whose token-override layer and mode are how the chosen background
- * reaches the document.
+ * Required services: the slots/locale pair the row registers through,
+ * `configForms`, whose served form is how this plugin reads and writes its
+ * volatile Config field, and `theme`, whose token-override layer and mode are
+ * how the chosen background reaches the document. `remote` carries the shared
+ * settings document the served form derives from; the form's invalidation
+ * subscriptions live with its provider, so binding a form adds no wire read.
  */
-export const inject = ['slots', 'locale', 'remote', 'settingsScope', 'theme']
+export const inject = ['slots', 'locale', 'remote', 'configForms', 'theme']
 
 /**
  * Client plugin body: own the background runtime and register the Background
@@ -46,8 +51,12 @@ export const inject = ['slots', 'locale', 'remote', 'settingsScope', 'theme']
  * @param ctx - client cordis context.
  */
 export function apply(ctx: ClientContext): void {
-  const host: SettingsScope<BackgroundSettings> =
-    ctx.settingsScope.bind<BackgroundSettings>({ namespace: BACKGROUND_SETTINGS_NAMESPACE })
+  // The form of this plugin's own profile entry: its volatile projection is
+  // exactly the `defaultBackground` field, so the runtime reads and writes the
+  // selection there. `BACKGROUND_SETTINGS_NAMESPACE` is the entry id this
+  // package's bundle patch composes; a deployment that renames the row spells
+  // the same literal in its patch.
+  const form = ctx.configForms.get<BackgroundConfigSection>(BACKGROUND_SETTINGS_NAMESPACE)
 
   ctx.effect(
     () => ctx.locale.register(BACKGROUND_LOCALE_NAMESPACE, { zh, en }),
@@ -56,7 +65,7 @@ export function apply(ctx: ClientContext): void {
 
   const store = createBackgroundRowStore()
   let bound: BoundActions<typeof store> | undefined
-  const runtime = new BackgroundRuntime(host, ctx.theme)
+  const runtime = new BackgroundRuntime(form, ctx.theme)
   // The row and its tiles draw the shipped gradients, which carry one value per
   // palette mode, so the mode the theme resolved to is part of what they render.
   runtime.setColorScheme(ctx.theme.getTheme().active.colorScheme)
@@ -97,4 +106,10 @@ export function apply(ctx: ClientContext): void {
     locale: BACKGROUND_LOCALE_NAMESPACE,
     inject: injected,
   }, BackgroundImageRow))
+}
+
+/** What the Host's volatile Config projection serves for this plugin's entry. */
+export interface BackgroundConfigSection {
+  /** Persisted background; absent until a user choice or a composition default. */
+  [BACKGROUND_CONFIG_FIELD]?: BackgroundSettings
 }

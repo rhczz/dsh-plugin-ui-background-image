@@ -13,10 +13,10 @@
 import { useState } from 'react'
 import { clsx } from 'clsx'
 import {
-  IconChevronDownOutline14,
-  IconPersonalizationOutline16,
-  IconRefreshOutline14,
-  IconWarningOutline16,
+  IconChevronDownOutlineRegular,
+  IconPersonalizationOutlineRegular,
+  IconRefreshOutlineRegular,
+  IconWarningOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime, PropsStore, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -192,7 +192,7 @@ export function BackgroundImageRow({
         <div className={css.desc}>{t('background.description')}</div>
         {!available && (
           <div className={css.missing}>
-            <IconWarningOutline16 className={css.missingIcon} />
+            <IconWarningOutlineRegular size={16} className={css.missingIcon} />
             {t('background.missing')}
           </div>
         )}
@@ -207,7 +207,7 @@ export function BackgroundImageRow({
             {t('notice.loadFailed')}
             {detailSuffix(catalogError)}
             <button type="button" className={css.retry} onClick={reload}>
-              <IconRefreshOutline14 />
+              <IconRefreshOutlineRegular size={14} />
               {t('action.retry')}
             </button>
           </div>
@@ -223,7 +223,7 @@ export function BackgroundImageRow({
         onClick={() => { setPicking(true) }}
       >
         {preset === undefined
-          ? <IconPersonalizationOutline16 className={css.swatchIcon} />
+          ? <IconPersonalizationOutlineRegular size={16} className={css.swatchIcon} />
           : (
             <span
               className={clsx(css.swatch, presetValue === '' && css.swatchPlain)}
@@ -231,7 +231,7 @@ export function BackgroundImageRow({
             />
           )}
         <span className={css.selectorLabel}>{label}</span>
-        <IconChevronDownOutline14 className={css.chevron} />
+        <IconChevronDownOutlineRegular size={14} className={css.chevron} />
       </button>
 
       <BackgroundPickerDialog
