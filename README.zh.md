@@ -28,12 +28,15 @@ kind: "package-bundle"
 
 ```text
 dsh plugin --profile web add dsh-plugin-ui-background-image
+dsh plugin --profile web add https://github.com/rhczz/dsh-plugin-ui-background-image/releases/download/v0.2.0/dsh-plugin-ui-background-image-0.2.0.tgz
 dsh plugin --profile web remove dsh-plugin-ui-background-image
 ```
 
+直接用包名安装的是 npm 上的发布版。第二种形式安装带 tag 的 release 所附的 tarball；当 npm 上的版本比你在用的 harness 还旧时用它：本包的 0.2 系列才是对应 harness 0.2 设置架构的那一版，0.1 在那边根本不会挂载浏览器半边。
+
 本包声明了 `dsh.bundle.patch`，因此 `add` 会把它记入 profile 的 `dsh.profile.bundles` 并应用其覆盖层，把 `ui-background-image` 一行插入配置树。重启 `dsh web` 后，该行出现在「设置 → 通用设置」，位于「字体」下方。
 
-从 npm 安装使用已发布的产物；从 git ref 或源码目录安装会在本机构建一次。pnpm 默认拦截构建脚本，直到 profile 的 `pnpm-workspace.yaml` 放行：按首次尝试打印出的 `allowBuilds` 一行配置即可。
+从 tarball、git ref 或源码目录安装会在本机构建一次。pnpm 默认拦截构建脚本，直到 profile 的 `pnpm-workspace.yaml` 放行：按首次尝试打印出的 `allowBuilds` 一行配置即可。
 
 ### 提供的内容
 

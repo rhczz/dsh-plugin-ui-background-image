@@ -28,12 +28,15 @@ The Background image row in General settings gives the interface a background. U
 
 ```text
 dsh plugin --profile web add dsh-plugin-ui-background-image
+dsh plugin --profile web add https://github.com/rhczz/dsh-plugin-ui-background-image/releases/download/v0.2.0/dsh-plugin-ui-background-image-0.2.0.tgz
 dsh plugin --profile web remove dsh-plugin-ui-background-image
 ```
 
+Use the bare package name for the npm release. The second form installs the tarball a tagged release publishes, which is what to reach for when npm still carries a version older than the harness in use: this package's 0.2 line is the one that speaks the harness 0.2 settings architecture, and a 0.1 install mounts no browser half there at all.
+
 The package declares `dsh.bundle.patch`, so `add` records it in the profile's `dsh.profile.bundles` and applies its layer, which inserts the `ui-background-image` row into the composition. Restart `dsh web` and the row appears in Settings → General, under Font family.
 
-Installing from npm uses the published artifacts. Installing from a git ref or a source directory builds the package on that machine, and pnpm blocks the build script until the profile's `pnpm-workspace.yaml` allows it; follow the `allowBuilds` line the first attempt prints.
+Installing from a tarball, a git ref, or a source directory builds the package on that machine, and pnpm blocks the build script until the profile's `pnpm-workspace.yaml` allows it; follow the `allowBuilds` line the first attempt prints.
 
 ### What you get
 
