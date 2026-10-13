@@ -1,21 +1,5 @@
 {
-  // The harness checkout this package is developed in owns every
-  // `@deepseek-ai/*` module this package imports: the base config's generated
-  // `paths` map resolves each workspace name to its TypeScript sources, and
-  // the project references below substitute each harness package's built
-  // declaration output for those sources. A typecheck therefore validates the
-  // plugin against the harness it runs inside, not the published copies
-  // node_modules holds; removing both falls back to those copies.
-  //
-  // `composite` is inherited from the base and turned off: this is a leaf
-  // project, references only redirect away from it, and nothing references it.
-  // `incremental` goes with it: a typecheck run records build info even under
-  // `--noEmit`, and a later `pnpm build` would then treat the program as
-  // unchanged and emit nothing at all.
-  "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "composite": false,
-    "incremental": false,
     "target": "es2024",
     "module": "esnext",
     "moduleResolution": "bundler",
@@ -47,28 +31,5 @@
   },
   "include": [
     "src"
-  ],
-  // The harness packages this plugin consumes are composite projects with
-  // their own compiler options, so TypeScript substitutes each one's built
-  // declaration output for the source file the base config's `paths` map
-  // resolves. Without the substitution the program would compile harness and
-  // vendor sources under this package's options and report their own errors.
-  "references": [
-    { "path": "../vendor/cordis" },
-    { "path": "../vendor/cosmokit" },
-    { "path": "../vendor/loader" },
-    { "path": "../vendor/schemastery" },
-    { "path": "../packages/api/remotes/tsconfig.client.json" },
-    { "path": "../packages/client/connection/tsconfig.client.json" },
-    { "path": "../packages/client/locale/tsconfig.client.json" },
-    { "path": "../packages/client/store" },
-    { "path": "../packages/client/ui-primitives" },
-    { "path": "../packages/client/ui-renderer" },
-    { "path": "../packages/client/ui-settings/tsconfig.client.json" },
-    { "path": "../packages/client/ui-slots" },
-    { "path": "../packages/client/ui-theme/tsconfig.client.json" },
-    { "path": "../packages/host/webserver" },
-    { "path": "../packages/settings/settings" },
-    { "path": "../packages/util/home-paths" }
   ]
 }

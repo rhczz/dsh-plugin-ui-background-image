@@ -1,8 +1,4 @@
 {
-  // Test program: the plugin's sources plus its specs and build configs. The
-  // TypeScript compiler does not inherit `references` through `extends`, so the
-  // harness project list is repeated here; without it the specs would compile
-  // the harness's own sources under this package's compiler options.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
@@ -13,25 +9,6 @@
   "include": [
     "src",
     "tests",
-    "tsdown.config.ts",
     "vitest.config.ts"
-  ],
-  "references": [
-    { "path": "../vendor/cordis" },
-    { "path": "../vendor/cosmokit" },
-    { "path": "../vendor/loader" },
-    { "path": "../vendor/schemastery" },
-    { "path": "../packages/api/remotes/tsconfig.client.json" },
-    { "path": "../packages/client/connection/tsconfig.client.json" },
-    { "path": "../packages/client/locale/tsconfig.client.json" },
-    { "path": "../packages/client/store" },
-    { "path": "../packages/client/ui-primitives" },
-    { "path": "../packages/client/ui-renderer" },
-    { "path": "../packages/client/ui-settings/tsconfig.client.json" },
-    { "path": "../packages/client/ui-slots" },
-    { "path": "../packages/client/ui-theme/tsconfig.client.json" },
-    { "path": "../packages/host/webserver" },
-    { "path": "../packages/settings/settings" },
-    { "path": "../packages/util/home-paths" }
   ]
 }
